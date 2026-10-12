@@ -1,0 +1,29 @@
+# Segreti
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+dist/
+npm-debug.log*
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Dati generati a runtime
+backend/chroma_data/
+data_agent/charts/*.png
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Conversazioni salvate (dati degli utenti)
+backend/storage/
+
+# Dataset caricati dagli utenti (data agent)
+data_agent/datasets/

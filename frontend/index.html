@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Management AI · Assistente AI per la gestione del club</title>
+    <!--
+      Pallone di caricamento iniziale: è scritto direttamente qui (HTML + CSS, nessuna dipendenza)
+      così compare subito, prima che il browser scarichi ed esegua il codice React.
+      Lo rimuove App.jsx quando l'app è pronta.
+    -->
+    <style>
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: grid;
+        place-items: center;
+        background: #ffffff;
+        transition: opacity 0.25s ease;
+      }
+      #boot.hide {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #boot .boot-loader {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        color: #52655a;
+        font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      #boot .boot-track {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding-top: 25px;
+      }
+      #boot svg {
+        width: 56px;
+        height: 56px;
+        animation: boot-bounce 0.8s infinite;
+      }
+      #boot .boot-shadow {
+        width: 45px;
+        height: 8px;
+        margin-top: 2px;
+        border-radius: 50%;
+        background: rgba(12, 40, 24, 0.28);
+        animation: boot-shadow 0.8s infinite;
+      }
+      @keyframes boot-bounce {
+        0%,
+        100% {
+          transform: translateY(0) rotate(0deg);
+          animation-timing-function: cubic-bezier(0.2, 0.6, 0.35, 1);
+        }
+        50% {
+          transform: translateY(-25px) rotate(180deg);
+          animation-timing-function: cubic-bezier(0.65, 0, 0.8, 0.4);
+        }
+      }
+      @keyframes boot-shadow {
+        0%,
+        100% {
+          transform: scaleX(1);
+          opacity: 1;
+        }
+        50% {
+          transform: scaleX(0.5);
+          opacity: 0.4;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot svg,
+        #boot .boot-shadow {
+          animation: none;
+        }
+      }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- font caricati senza bloccare il primo disegno della pagina (e quindi il pallone) -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+      media="print"
+      onload="this.media = 'all'"
+    />
+  </head>
+  <body>
+    <div id="boot" role="status" aria-label="Caricamento">
+      <div class="boot-loader">
+        <div class="boot-track" aria-hidden="true">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+            <defs><clipPath id="boot-ball"><circle cx="32" cy="32" r="29" /></clipPath></defs>
+            <circle cx="32" cy="32" r="29" fill="#ffffff" />
+            <g clip-path="url(#boot-ball)" fill="#13231a" stroke="#13231a" stroke-width="2.4">
+              <polygon points="32.00,22.50 41.04,29.06 37.58,39.69 26.42,39.69 22.96,29.06" stroke="none" />
+              <line x1="32.00" y1="22.50" x2="32.00" y2="9.00" />
+              <polygon points="32.00,10.50 23.92,4.63 27.00,-4.88 37.00,-4.88 40.08,4.63" stroke="none" />
+              <line x1="41.04" y1="29.06" x2="53.87" y2="24.89" />
+              <polygon points="52.45,25.36 55.54,15.85 65.53,15.85 68.62,25.36 60.53,31.23" stroke="none" />
+              <line x1="37.58" y1="39.69" x2="45.52" y2="50.61" />
+              <polygon points="44.64,49.39 54.63,49.39 57.72,58.90 49.63,64.77 41.55,58.90" stroke="none" />
+              <line x1="26.42" y1="39.69" x2="18.48" y2="50.61" />
+              <polygon points="19.36,49.39 22.45,58.90 14.37,64.77 6.28,58.90 9.37,49.39" stroke="none" />
+              <line x1="22.96" y1="29.06" x2="10.13" y2="24.89" />
+              <polygon points="11.55,25.36 3.47,31.23 -4.62,25.36 -1.53,15.85 8.46,15.85" stroke="none" />
+            </g>
+            <circle cx="32" cy="32" r="29" fill="none" stroke="#13231a" stroke-width="3" />
+          </svg>
+          <div class="boot-shadow"></div>
+        </div>
+        <span>Caricamento…</span>
+      </div>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
