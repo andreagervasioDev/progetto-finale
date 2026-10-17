@@ -40,7 +40,7 @@ export async function handleTurn(user, { sessionId, message, docId }, onEvent) {
     userId,
     sessionId,
     message,
-    { content: result.reply, charts: result.charts, sources: result.sources, trace: result.trace },
+    { content: result.reply, charts: result.charts, tables: result.tables, sources: result.sources, trace: result.trace },
     readable ? { document: readable } : {},
   );
   return { sessionId, title: conversation.title, message: assistantMsg, ...result };

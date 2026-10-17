@@ -74,17 +74,13 @@ def test_alias_di_funzione_vietata_non_esegue(executor):
     assert out.startswith("Codice rifiutato per sicurezza")
 
 
-def test_savefig_bloccato_ma_save_chart_consentito():
-    """I grafici si salvano solo con save_chart(); plt.savefig diretto è vietato (scrive dove vuole)."""
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
+def test_matplotlib_non_disponibile_i_grafici_si_creano_con_chart():
+    """Il codice generato non disegna con matplotlib: i grafici passano da chart() (JSON per React + PNG)."""
     charts = []
-    ex = PythonExecutor({"pd": pd, "np": np, "plt": plt, "save_chart": lambda t="g": charts.append(t)})
-    assert ex.run("plt.plot([1, 2]); plt.savefig('/tmp/x.png')").startswith("Codice rifiutato per sicurezza")
-    ex.run("plt.plot([1, 2, 3]); save_chart('ok')")
+    ex = PythonExecutor({"pd": pd, "np": np, "chart": lambda data, **kw: charts.append(kw.get("title"))})
+    for code in ("import matplotlib.pyplot as plt", "import seaborn as sns"):
+        assert ex.run(code).startswith("Codice rifiutato per sicurezza"), code
+    ex.run("chart(pd.Series([1, 2]), kind='bar', title='ok')")
     assert charts == ["ok"]
 
 
@@ -105,5 +101,16 @@ def test_pandas_globale_non_viene_modificato():
     assert np.load.__name__ == "load"
 
 
+def test_gli_avvisi_di_numpy_non_interrompono_l_esecuzione(executor):
+    """Un RuntimeWarning (divisione per zero, media di dati vuoti) è normale in un'analisi: non deve fallire."""
+    assert executor.run("print(np.int64(1) / 0)") == "inf"
+    assert executor.run("print(np.mean(np.array([])))") == "nan"
+
+
+def test_gli_import_consentiti_funzionano_anche_eseguendo_il_codice(executor):
+    assert executor.run("import math\nprint(math.sqrt(16))") == "4.0"
+    assert executor.run("from collections import Counter\nprint(Counter('aab')['a'])") == "2"
+
+
 def test_import_consentiti():
-    check_code("import pandas as pd\nimport numpy as np\nimport matplotlib.pyplot as plt\nimport seaborn as sns")
+    check_code("import pandas as pd\nimport numpy as np\nimport math\nfrom collections import Counter")

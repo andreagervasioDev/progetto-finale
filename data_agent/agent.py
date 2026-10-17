@@ -12,26 +12,20 @@ from __future__ import annotations
 
 import json
 import os
-import uuid
 from pathlib import Path
 
-import matplotlib
+import numpy as np
+import pandas as pd
+from openai import OpenAI
 
-matplotlib.use("Agg")  # backend senza GUI: i grafici vengono solo salvati su file
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
-import seaborn as sns  # noqa: E402
-from openai import OpenAI  # noqa: E402
-
-from datasets import Dataset, DatasetStore  # noqa: E402
-from executor import PythonExecutor  # noqa: E402
+from charts import make_helpers
+from datasets import Dataset, DatasetStore
+from executor import PythonExecutor
 
 CHARTS_DIR = Path(__file__).parent / "charts"
 CHARTS_DIR.mkdir(exist_ok=True)
 MAX_STEPS = int(os.getenv("DATA_AGENT_MAX_STEPS", "8"))
 
-CLUB_PALETTE = ["#16774a", "#ff7a1a", "#2bb673", "#f2b134", "#0b4d2c", "#c0392b", "#7a8a80"]
 
 SCHEMA_DESCRIPTION = """
 Ogni riga = un giocatore in una partita (solo chi e' sceso in campo). Colonne del DataFrame `df`:
@@ -64,7 +58,15 @@ HAI UN SOLO STRUMENTO: `run_python`, un interprete Python con stato. Nel namespa
 - `df`: il DataFrame GIA' PULITO (vedi cleaning_report)
 - `df_raw`: il file grezzo originale, da usare SOLO se la domanda riguarda la qualita' dei dati
 - `cleaning_report`: stringa con i passi di pulizia applicati
-- `pd`, `np`, `plt`, `sns` e la funzione `save_chart(title)` che salva la figura matplotlib corrente e ne restituisce il nome file
+- `pd`, `np`
+- `chart(data, kind, x, y, title, x_label, y_label)`: crea un GRAFICO dai dati. `data` è un DataFrame o una Series
+  (anche il risultato di un groupby); `kind` = "bar" (barre verticali), "barh" (barre orizzontali, per classifiche
+  con nomi lunghi), "line" (andamento nel tempo), "scatter" (relazione tra due misure); `x` = colonna delle categorie
+  o del tempo, `y` = colonna dei valori oppure una lista di massimo 4 colonne da confrontare (stessa unità di misura).
+  Il grafico viene mostrato all'utente nella chat, interattivo.
+- `table(data, title)`: mostra un DataFrame come TABELLA nella chat (massimo 50 righe), es. una classifica.
+I grafici si creano SOLO con chart(): matplotlib e seaborn non sono disponibili. Se un grafico non è tra i tipi
+supportati (es. una heatmap), mostra i dati con table().
 
 {ds.schema}
 
@@ -73,17 +75,24 @@ METODO DI LAVORO (ReAct):
 2. Scrivi codice pandas conciso e stampa SEMPRE i risultati con print(). Non inventare mai numeri: usa solo gli output reali.
 3. Esegui eventuale pulizia aggiuntiva specifica per la domanda:
 {notes}
-4. Genera UN grafico chiaro quando aiuta a capire il risultato (trend, confronti, distribuzioni):
-   titolo e assi in italiano, etichette leggibili, poi chiama save_chart("titolo"). Non usare plt.show().
-   Se la domanda chiede esplicitamente piu' grafici puoi generarne fino a 3.
+4. Quando aiuta a capire il risultato crea UN grafico con chart() (trend, confronti, distribuzioni), con titolo e
+   etichette degli assi in italiano. Prima prepara i dati (aggrega, ordina, tieni i valori principali: massimo 40
+   categorie per le barre). Esempio:
+       top = df.groupby('player_name')['goals'].sum().sort_values(ascending=False).head(10)
+       chart(top, kind="barh", title="Migliori marcatori", x_label="Giocatore", y_label="Gol")
+   I nomi delle colonne diventano le etichette di serie e tabelle: rinominale in italiano prima di chiamare
+   chart() o table() (es. .rename(columns={{'goals': 'Gol', 'xg': 'xG'}})).
+   Per una classifica o un elenco di dati usa table(). Se la domanda chiede piu' grafici puoi crearne fino a 3.
+   Non confrontare nello stesso grafico misure con unità diverse (es. gol e km): fai due grafici.
 5. Se il codice va in errore, leggi il traceback e correggi.
 
 RISPOSTA FINALE (in italiano, senza chiamare altri strumenti), in markdown:
 - **Risultato chiave** in 1-2 frasi con i numeri principali
-- una breve tabella o elenco con i dati rilevanti (max ~10 righe)
+- una breve tabella o elenco con i dati rilevanti (max ~10 righe), a meno che tu non abbia gia' creato la tabella con table()
 - **Insight**: cosa significano i numeri e cosa conviene fare
 - una riga finale "_Qualita' dati:_ ..." che cita solo le operazioni di pulizia rilevanti per questa analisi
-Non includere il codice nella risposta finale e non inserire immagini markdown: i grafici vengono allegati automaticamente.
+Non includere il codice nella risposta finale e non inserire immagini markdown: grafici e tabelle creati con chart()
+e table() vengono allegati automaticamente sotto la risposta.
 """
 
 
@@ -104,42 +113,28 @@ TOOLS = [{
 }]
 
 
-def _setup_plot_style() -> None:
-    sns.set_theme(style="whitegrid", palette=CLUB_PALETTE)
-    plt.rcParams.update({"figure.figsize": (10, 5.5), "figure.dpi": 110, "axes.titleweight": "bold",
-                         "axes.titlesize": 13, "axes.spines.top": False, "axes.spines.right": False})
-
-
 class PandasAgent:
     def __init__(self, store: DatasetStore):
         self.store = store
         self.client = OpenAI()  # legge OPENAI_API_KEY dalle variabili d'ambiente
         self.model = os.getenv("DATA_AGENT_MODEL") or os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
-        _setup_plot_style()
 
-    def _new_namespace(self, ds: Dataset, charts: list[dict]) -> dict:
-        def save_chart(title: str = "grafico") -> str:
-            fig = plt.gcf()
-            if not fig.get_axes():
-                return "Nessuna figura da salvare: crea prima il grafico."
-            fig.tight_layout()
-            name = f"chart_{uuid.uuid4().hex[:10]}.png"
-            fig.savefig(CHARTS_DIR / name, bbox_inches="tight")
-            plt.close("all")
-            charts.append({"filename": name, "title": title})
-            return f"Grafico salvato: {name}"
-
+    def _new_namespace(self, ds: Dataset, charts: list[dict], tables: list[dict]) -> dict:
+        # i grafici si creano solo con chart(): JSON per il frontend React + PNG con matplotlib (charts.py)
+        chart, table = make_helpers(CHARTS_DIR, charts, tables)
         return {
             "df": ds.clean.copy(),
             "df_raw": ds.raw.copy(),
             "cleaning_report": str(ds.report),
-            "pd": pd, "np": np, "plt": plt, "sns": sns,
-            "save_chart": save_chart,
+            "pd": pd, "np": np,
+            "chart": chart,
+            "table": table,
         }
 
     def analyze(self, question: str, context: str | None, ds: Dataset) -> dict:
         charts: list[dict] = []
-        executor = PythonExecutor(self._new_namespace(ds, charts))
+        tables: list[dict] = []
+        executor = PythonExecutor(self._new_namespace(ds, charts, tables))
         steps: list[dict] = []
         usage: dict[str, dict] = {}  # token consumati per modello, restituiti al backend per i KPI di spesa
 
@@ -154,7 +149,7 @@ class PandasAgent:
             messages.append(msg.model_dump(exclude_none=True))
 
             if not msg.tool_calls:
-                return self._result(msg.content or "", steps, charts, ds, usage)
+                return self._result(msg.content or "", steps, charts, tables, ds, usage)
 
             for call in msg.tool_calls:
                 try:
@@ -171,13 +166,13 @@ class PandasAgent:
                                                     "Scrivi ora la risposta finale con i risultati ottenuti."})
         resp = self.client.chat.completions.create(model=self.model, messages=messages, temperature=0)
         _add_usage(usage, resp, self.model)
-        return self._result(resp.choices[0].message.content or "", steps, charts, ds, usage)
+        return self._result(resp.choices[0].message.content or "", steps, charts, tables, ds, usage)
 
-    def _result(self, answer: str, steps: list[dict], charts: list[dict], ds: Dataset, usage: dict) -> dict:
-        plt.close("all")
+    def _result(self, answer: str, steps: list[dict], charts: list[dict], tables: list[dict], ds: Dataset, usage: dict) -> dict:
         return {
             "answer": answer.strip(),
             "charts": charts,
+            "tables": tables,
             "steps": steps,
             "dataset": {"id": ds.id, "title": ds.title},
             "cleaning_report": ds.report.to_dict(),

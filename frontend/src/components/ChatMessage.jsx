@@ -1,13 +1,21 @@
+import { Suspense, lazy } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ChartGallery from "./ChartGallery.jsx";
+import DataTable from "./DataTable.jsx";
 import Icon from "./Icon.jsx";
 import ToolTrace from "./ToolTrace.jsx";
+
+// Recharts pesa ~400 KB: viene scaricato solo quando una risposta contiene un grafico
+const DataChart = lazy(() => import("./DataChart.jsx"));
 
 const time = (ts) => new Date(ts).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
 
 export default function ChatMessage({ message, compact = false }) {
-  const { role, content, charts, trace, sources, error, createdAt, document } = message;
+  const { role, content, charts, tables, trace, sources, error, createdAt, document } = message;
+  // grafici con i dati (JSON) → disegnati in React; senza (conversazioni precedenti, save_chart) → immagine PNG
+  const dataCharts = charts?.filter((c) => c.spec) ?? [];
+  const imageCharts = charts?.filter((c) => !c.spec) ?? [];
 
   if (role === "user") {
     return (
@@ -53,7 +61,19 @@ export default function ChatMessage({ message, compact = false }) {
             </ReactMarkdown>
           )}
         </div>
-        {charts?.length > 0 && <ChartGallery charts={charts} />}
+        {(dataCharts.length > 0 || tables?.length > 0) && (
+          <div className="analysis-results">
+            {dataCharts.map((c) => (
+              <Suspense key={c.filename} fallback={<div className="data-chart chart-loading">Carico il grafico…</div>}>
+                <DataChart chart={c} />
+              </Suspense>
+            ))}
+            {tables?.map((t, i) => (
+              <DataTable key={i} table={t} />
+            ))}
+          </div>
+        )}
+        {imageCharts.length > 0 && <ChartGallery charts={imageCharts} />}
         <span className="time">{time(createdAt)}</span>
       </div>
     </div>

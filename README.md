@@ -62,12 +62,12 @@ Corrispondenza tra i requisiti del progetto e la loro implementazione.
 | Frontend React con chat come punto di interazione | `frontend/`: pagina Assistente e pannello laterale presente in ogni pagina |
 | Memoria conversazionale e stato asincrono dei messaggi | conversazioni salvate su disco e riprendibili (`repositories/conversationRepository.js`, `context/ChatContext.jsx`) |
 | Stato di caricamento ("sta ragionando" / "sta eseguendo codice") | eventi SSE dal backend mostrati da `TypingIndicator.jsx` |
-| Rendering di testo e grafici generati dal backend | `ChatMessage.jsx` (Markdown + tabelle), `ChartGallery.jsx` (PNG dal data agent) |
+| Rendering di testo e grafici generati dal backend | `ChatMessage.jsx` (Markdown), `DataChart.jsx` e `DataTable.jsx` (grafici e tabelle React dai dati dell'analisi), `ChartGallery.jsx` (PNG) |
 | Endpoint `POST /api/chat`, session state e function calling | `backend/src/routes/chat.routes.js` → `services/chatService.js` → `services/agentService.js` |
 | L'LLM decide in autonomia tra RAG e data agent (ReAct) | SDK OpenAI nativo, tool `search_knowledge_base` e `analyze_data` (`tools/index.js`) |
 | RAG con istanza locale di ChromaDB: avvio, indicizzazione, retrieval | `npm run chroma`, indicizzazione automatica all'avvio (`services/documentService.js`, `rag/`) |
 | Integrazione Node ↔ Python tramite microservizio locale | FastAPI su `:8001`, chiamato da `clients/dataAgentClient.js` |
-| Agente pandas: domanda → codice Python → pulizia → grafico su disco → sintesi | `data_agent/agent.py`, `executor.py`, `cleaning.py`; grafici in `data_agent/charts/` |
+| Agente pandas: domanda → codice Python → pulizia → grafico su disco → sintesi | `data_agent/agent.py`, `executor.py`, `cleaning.py`, `charts.py`; ogni grafico è salvato come PNG con matplotlib in `data_agent/charts/` e restituito anche come JSON per i grafici React |
 | Interprete deterministico di codice | `executor.py`: il codice viene eseguito davvero, in una sandbox a più barriere (AST, builtins ridotti, I/O neutralizzato, timeout), verificata da `test_executor.py` |
 | API key solo in `.env`, escluso dal version control | `.env` nella root, `.env.example` con segnaposto, `.gitignore` |
 | README con installazione dei 3 ambienti e sequenza di avvio | sezioni [6](#6-installazione) e [8](#8-avvio) |
@@ -95,7 +95,7 @@ Oltre ai requisiti, la piattaforma aggiunge l'accesso con password e una dashboa
                                                   │ collection            │  │ · pipeline di data cleaning        │
                                                   │management_ai_documents│  │ · pandas agent ReAct (OpenAI)      │
                                                   │ embedding OpenAI      │  │ · interprete Python sandboxed      │
-                                                  └───────────────────────┘  │ · grafici matplotlib/seaborn → PNG │
+                                                  └───────────────────────┘  │ · grafici: JSON (React) + PNG      │
                                                           :8000              └──────────────────────────────────┘
                                                                                            :8001
 ```
@@ -150,7 +150,9 @@ Progetto finale/
 │       │   ├── FileDropUpload.jsx  # trascinamento di file da Finder / Esplora risorse in qualsiasi pagina
 │       │   ├── DatasetView.jsx     # panoramica di un dataset (pagina Dati e lettore Excel/CSV)
 │       │   ├── ChatMessage.jsx     # rendering markdown (tabelle GFM) + grafici
-│       │   ├── ChartGallery.jsx    # immagini dei grafici con zoom e download
+│       │   ├── DataChart.jsx       # grafico React (Recharts) dai dati dell'analisi, con vista tabella e PNG
+│       │   ├── DataTable.jsx       # tabella React creata dal data agent con table()
+│       │   ├── ChartGallery.jsx    # grafici come immagini PNG (conversazioni precedenti e grafici speciali)
 │       │   ├── ToolTrace.jsx       # "Come ho risposto": strumenti, fonti cliccabili, codice, cleaning
 │       │   ├── TypingIndicator.jsx # indicatore con lo stato live dell'agente
 │       │   ├── BallLoader.jsx      # caricamento con pallone che rimbalza
@@ -214,6 +216,7 @@ Progetto finale/
     ├── app.py                   # microservizio: /analyze, /datasets, /charts, /health
     ├── datasets.py              # archivio dataset: lettura CSV/Excel, pulizia generica, schema per l'LLM
     ├── agent.py                 # pandas agent ReAct (OpenAI tool calling)
+    ├── charts.py                # chart() e table(): JSON per il frontend React + PNG con matplotlib
     ├── executor.py              # sandbox: AST + builtins ridotti + I/O neutralizzato + timeout
     ├── cleaning.py              # pipeline di data cleaning dedicata al dataset partite
     ├── datasets/                # file Excel/CSV caricati dagli utenti (escluso da git)
@@ -450,6 +453,7 @@ cd data_agent && .venv/bin/python -m pytest -q tests             # Python (pytes
 | `data_agent/tests/test_datasets.py` | pulizia dei CSV/Excel caricati: formati italiani (`€ 1.234,50`, `1.200.000`, `15%`, gg/mm/aaaa), duplicati, righe vuote |
 | `backend/tests/fileCheck.test.js` | controllo del contenuto dei file caricati: firma del formato (eseguibile rinominato `.pdf`, binario rinominato `.csv`), zip bomb (dimensione, rapporto di compressione, numero di elementi), archivi danneggiati |
 | `backend/tests/sanitize.test.js` | pulizia dell'HTML dei file Word: rimozione di script, gestori di eventi, iframe, link `javascript:` e immagini `data:text/html`; formattazione legittima conservata |
+| `data_agent/tests/test_charts.py` | grafici e tabelle: specifica JSON (serie, colori, date, NaN), errori comprensibili per l'LLM, PNG con matplotlib, limite di righe delle tabelle, istruzioni del pandas agent |
 | `data_agent/tests/test_api.py` | API FastAPI: health, panoramica, caricamento e rimozione di un dataset, validazione di `/analyze` |
 
 ---
@@ -546,11 +550,17 @@ La knowledge base è composta dai **documenti ufficiali del club** (i file di `b
 - Agente ReAct con un solo strumento, `run_python`: l'LLM scrive codice, `executor.py` lo **esegue davvero** in un namespace persistente e l'output reale torna al modello. I numeri della risposta vengono quindi da calcoli effettivi e non da stime dell'LLM (interprete deterministico).
 - **Più dataset**: il dataset partite usa la **pipeline di cleaning dedicata** (`cleaning.py`); i file Excel/CSV caricati passano da una **pulizia generica** tracciata (`datasets.py`): nomi di colonna, righe e colonne vuote, duplicati, spazi, numeri salvati come testo in formato italiano (`€ 1.234,50`, `15%`), date. Lo **schema** di ogni file (tipi, range, esempi di valori) viene generato in automatico e passato all'LLM. Excel: primo foglio non vuoto; CSV: separatore e codifica rilevati automaticamente.
 - L'agente riceve `df` (pulito), `df_raw` (grezzo) e `cleaning_report`, e può applicare **pulizie aggiuntive specifiche per la domanda** (per le partite: escludere rating NaN, soglia minima di minuti, esclusione dei portieri).
-- **Grafici**: l'helper `save_chart(title)` salva la figura matplotlib/seaborn in `charts/` con palette e stile del club. Il backend espone i PNG tramite proxy (`/api/charts/:file`) e il frontend li mostra con zoom e download.
+- **Grafici e tabelle** (`charts.py`): l'agente non disegna a mano, ma chiama due funzioni:
+  - `chart(data, kind, x, y, title, ...)` con `kind` = `bar`, `barh`, `line` o `scatter` (al massimo 4 serie): valida i dati e produce una **specifica JSON** (assi, serie, punti) che il frontend disegna con **componenti React** (Recharts), interattivi e nello stile dell'app. Con lo stesso codice, nostro e non scritto dall'LLM, disegna anche il **PNG con matplotlib** e lo salva in `charts/`, come chiede la traccia: l'immagine si scarica dal grafico ("Scarica PNG").
+  - `table(data, title)`: una tabella JSON (massimo 50 righe) mostrata come tabella vera nella chat.
+  - Se i dati non vanno bene (troppi punti, colonna non numerica, tipo non supportato) la funzione risponde con un messaggio che dice all'LLM come correggere il codice.
+  - matplotlib e seaborn non sono disponibili al codice generato: i grafici passano solo da `chart()`. Se un tipo di grafico non è supportato (es. una heatmap), l'agente mostra i dati con `table()`.
+  - La palette (verde campo, arancione, blu, ocra) è la stessa nel PNG e nel frontend, validata per contrasto e daltonismo; ogni grafico ha anche la **vista a tabella**, così i valori non dipendono dal colore.
 - **Perché non `create_pandas_dataframe_agent` di LangChain?** Un agente custom con l'SDK OpenAI dà pieno controllo su sicurezza (validazione AST), gestione dei grafici, formato della risposta e tracciamento dei passi. Inoltre evita le frequenti incompatibilità di versione di `langchain-experimental`. Il paradigma resta lo stesso: ReAct con uno strumento Python REPL.
 
 ### Frontend
 - React 19 + Vite, `react-markdown` + `remark-gfm` per tabelle ed elenchi.
+- Grafici con **Recharts**: barre, barre orizzontali, linee e dispersione, con valori al passaggio del mouse, legenda per più serie, vista a tabella e download del PNG. Il codice dei grafici (circa 400 KB) viene scaricato solo quando una risposta contiene un grafico (`React.lazy`).
 - Streaming **SSE** per lo stato live ("Analizzo la richiesta" → "Consulto la knowledge base" → "Il data agent analizza il dataset"), con i passi completati mostrati nell'indicatore di digitazione.
 - **React Router** per le quattro aree. Lo stato della chat è in un **context condiviso**: pannello laterale e pagina Assistente mostrano la stessa conversazione, e il pulsante ⤢ cambia solo la vista.
 - Caricamento con **barra di avanzamento** (XMLHttpRequest) e **drag & drop**; lettore integrato per PDF (visualizzatore del browser, con salto alla pagina citata), Word (HTML), Markdown e TXT.
@@ -635,9 +645,9 @@ curl -X POST http://localhost:3002/api/chat \
 - **Accesso con password**: le password sono salvate solo come hash scrypt con salt casuale. La sessione è un token firmato con HMAC-SHA256 in un cookie `HttpOnly` e `SameSite=Lax` (il JavaScript della pagina non può leggerlo); la chiave di firma viene dal `.env` o è generata al primo avvio in `backend/storage/`, mai nel codice. Dopo 5 tentativi sbagliati lo stesso utente viene bloccato per 5 minuti; i tentativi falliti compaiono nello storico dell'admin. Le API admin controllano il ruolo lato server (`403` per gli altri).
 - `backend/storage/` (utenti, documenti, chat, storico attività e consumi, chiave delle sessioni) è escluso dal version control.
 - **Esecuzione di codice generato dall'LLM** (il codice scritto da un LLM non è fidato: istruzioni nascoste in un documento o in un file caricato — *prompt injection* — potrebbero spingerlo a generare codice ostile). `executor.py` lo contiene con **quattro barriere indipendenti**:
-  1. **Analisi AST**: blocca import non consentiti (solo pandas, numpy, matplotlib, seaborn, math, statistics, datetime, scipy, collections, itertools), funzioni pericolose (`open`, `exec`, `eval`, `__import__`, `getattr`...), gli attributi *dunder* (`__class__`, `__globals__`, `__subclasses__`...) e l'accesso diretto a `__builtins__`.
+  1. **Analisi AST**: blocca import non consentiti (solo pandas, numpy, math, statistics, datetime, scipy, collections, itertools: i grafici si creano con `chart()`), funzioni pericolose (`open`, `exec`, `eval`, `__import__`, `getattr`...), gli attributi *dunder* (`__class__`, `__globals__`, `__subclasses__`...) e l'accesso diretto a `__builtins__`.
   2. **Builtins ridotti**: il codice gira con un `__builtins__` privo di `open`, `__import__`, `eval`, `getattr`...: anche aggirando l'AST, quelle funzioni non esistono nel namespace.
-  3. **I/O neutralizzato**: pandas e numpy sono esposti al codice tramite un *proxy* che disattiva tutte le funzioni di lettura/scrittura di file o rete (`read_csv`, `to_csv`, `read_json` via URL, `np.load`, `savefig`...), senza modificare i moduli reali. Così il codice non può leggere il `.env` o altri file del server, né esfiltrare dati in rete. I grafici si salvano solo con la funzione `save_chart`.
+  3. **I/O neutralizzato**: pandas e numpy sono esposti al codice tramite un *proxy* che disattiva tutte le funzioni di lettura/scrittura di file o rete (`read_csv`, `to_csv`, `read_json` via URL, `np.load`, `savefig`...), senza modificare i moduli reali. Così il codice non può leggere il `.env` o altri file del server, né esfiltrare dati in rete. I grafici si creano solo con la funzione `chart()`.
   4. **Timeout**: il codice gira sotto un limite di tempo (`DATA_AGENT_EXEC_TIMEOUT`, default 15s); un ciclo troppo lungo viene interrotto senza bloccare il servizio.
 
   Queste barriere sono verificate da `data_agent/tests/test_executor.py` (lettura del `.env`, accesso alla rete, scrittura su disco, evasione via dunder, alias delle funzioni, timeout).

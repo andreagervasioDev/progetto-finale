@@ -624,6 +624,14 @@ pre.output {
   background: #fff;
 }
 
+.chart-missing p {
+  margin: 0;
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
 .chart-btn {
   display: block;
   width: 100%;
@@ -654,6 +662,141 @@ pre.output {
   text-decoration: none;
   font-weight: 500;
   white-space: nowrap;
+}
+
+/* grafici e tabelle disegnati in React dai dati dell'analisi */
+.analysis-results {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.data-chart {
+  margin: 0;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.data-chart > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px 6px 14px;
+}
+
+.data-chart > header strong {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.chart-loading {
+  display: grid;
+  place-items: center;
+  height: 300px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.data-chart-plot {
+  padding: 4px 8px 8px 0;
+}
+
+.data-chart figcaption {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+.data-chart figcaption a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--rag);
+  text-decoration: none;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.chart-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.chart-tooltip strong {
+  color: var(--text);
+}
+
+.chart-tooltip span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-tooltip i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.chart-tooltip b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.result-table-wrap {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.result-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.result-table th,
+.result-table td {
+  padding: 7px 14px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.result-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.result-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-table tbody tr:hover {
+  background: var(--surface-2);
+}
+
+.result-table .null {
+  color: var(--text-3);
 }
 
 .lightbox {

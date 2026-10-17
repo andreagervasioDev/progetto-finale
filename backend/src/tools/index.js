@@ -122,12 +122,17 @@ async function runAnalyzeData({ question, context, dataset_id }, ctx) {
   const data = await analyzeData({ question, context, datasetId });
   // token consumati dal pandas agent Python, attribuiti all'utente che ha fatto la domanda
   for (const u of data.usage ?? []) recordUsage({ kind: "data_agent", model: u.model, usage: u });
+  // ogni grafico ha la specifica JSON (disegnata dal frontend con React) e il PNG di matplotlib (url)
   const charts = data.charts.map((c) => ({ ...c, url: `/api/charts/${c.filename}` }));
+  const tables = data.tables ?? [];
+  const shown = [...charts.map((c) => `grafico "${c.title}"`), ...tables.map((t) => `tabella "${t.title || "senza titolo"}"`)];
   return {
     content:
       `[Dataset analizzato: ${data.dataset?.title ?? datasetId}]\n${data.answer}\n\n` +
-      `[Grafici generati e già mostrati all'utente: ${charts.length ? charts.map((c) => c.title).join(", ") : "nessuno"}]`,
+      `[Già mostrati all'utente sotto la risposta: ${shown.length ? shown.join(", ") : "nessun grafico o tabella"}. ` +
+      "Non ripetere in forma di tabella markdown i dati di una tabella già mostrata.]",
     charts,
+    tables,
     code: data.steps,
     cleaning: data.cleaning_report,
     dataset: data.dataset,

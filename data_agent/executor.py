@@ -36,12 +36,14 @@ import builtins
 import ctypes
 import io
 import os
+import sys
 import threading
 import traceback
 
 # Import consentiti nel codice generato: solo librerie di analisi e visualizzazione.
-ALLOWED_IMPORTS = {"pandas", "numpy", "matplotlib", "matplotlib.pyplot", "seaborn", "math",
-                   "statistics", "datetime", "scipy", "scipy.stats", "collections", "itertools"}
+# matplotlib e seaborn non ci sono: i grafici si creano con chart() (vedi charts.py).
+ALLOWED_IMPORTS = {"pandas", "numpy", "math", "statistics", "datetime", "scipy", "scipy.stats",
+                   "collections", "itertools"}
 
 # Nomi (built-in o variabili) che non devono comparire nel codice.
 FORBIDDEN_NAMES = {"open", "exec", "eval", "compile", "__import__", "input", "globals", "locals",
@@ -59,7 +61,7 @@ FORBIDDEN_ATTRS = {
     "read_sql_table", "read_json", "read_html", "read_hdf", "read_feather", "read_stata",
     "read_orc", "read_xml", "read_table", "read_fwf", "read_clipboard", "read_gbq",
     "read_spss", "read_sas", "fromfile", "load", "loadtxt", "genfromtxt",
-    # sistema / processi / salvataggio immagini (i grafici si salvano solo via save_chart)
+    # sistema / processi / salvataggio immagini (i grafici si creano solo con chart())
     "system", "popen", "remove", "rmdir", "unlink", "makedirs", "mkdir", "chmod", "chown",
     "savefig", "imsave",
 }
@@ -111,10 +113,61 @@ _SAFE_BUILTIN_NAMES = (
 )
 
 
+_ALLOWED_TOP_LEVEL = {name.split(".")[0] for name in ALLOWED_IMPORTS}
+
+
+def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+    """__import__ usato dal namespace dell'analisi.
+
+    Gli import scritti nel codice generato (file "<agent>") sono limitati alle librerie consentite;
+    quelli fatti internamente da pandas, numpy o dal modulo warnings restano liberi, altrimenti
+    un semplice avviso di numpy farebbe fallire l'esecuzione.
+    """
+    caller = sys._getframe(1).f_code.co_filename
+    if caller == "<agent>" and (level != 0 or name.split(".")[0] not in _ALLOWED_TOP_LEVEL):
+        raise ImportError(f"Import non consentito: {name}")
+    return builtins.__import__(name, globals, locals, fromlist, level)
+
+
 def _safe_builtins() -> dict:
     safe = {name: getattr(builtins, name) for name in _SAFE_BUILTIN_NAMES if hasattr(builtins, name)}
     safe["True"], safe["False"], safe["None"] = True, False, None
+    safe["__import__"] = _guarded_import
     return safe
+
+
+class _ThreadLocalStdout(io.TextIOBase):
+    """Uscita standard che, nel thread di un'analisi, scrive nel buffer di quell'analisi.
+
+    Sostituisce contextlib.redirect_stdout, che devia sys.stdout per tutto il processo: con due
+    analisi in parallelo l'output si mescolava, e dopo un timeout restava deviato.
+    """
+
+    def __init__(self, real):
+        self._real = real
+        self._local = threading.local()
+
+    def set_buffer(self, buffer):
+        self._local.buffer = buffer
+
+    def write(self, text):
+        target = getattr(self._local, "buffer", None) or self._real
+        return target.write(text)
+
+    def flush(self):
+        target = getattr(self._local, "buffer", None) or self._real
+        target.flush()
+
+
+_stdout_lock = threading.Lock()
+
+
+def _thread_stdout() -> _ThreadLocalStdout:
+    """Installa il proxy su sys.stdout se manca (anche se qualcuno l'ha sostituito, es. pytest)."""
+    with _stdout_lock:
+        if not isinstance(sys.stdout, _ThreadLocalStdout):
+            sys.stdout = _ThreadLocalStdout(sys.stdout)
+        return sys.stdout
 
 
 def _blocked(*_a, **_k):
@@ -191,19 +244,19 @@ class PythonExecutor:
         self.namespace = harden_namespace(namespace)
 
     def _execute(self, code: str, stdout: io.StringIO, result: dict) -> None:
+        # l'output di questo thread va nel buffer dell'analisi (vedi _ThreadLocalStdout)
+        _thread_stdout().set_buffer(stdout)
         try:
             tree = ast.parse(code)
             # come in un notebook: se l'ultima istruzione e' un'espressione, ne stampo il valore
             last_expr = None
             if tree.body and isinstance(tree.body[-1], ast.Expr):
                 last_expr = ast.Expression(tree.body.pop().value)
-            import contextlib
-            with contextlib.redirect_stdout(stdout):
-                exec(compile(tree, "<agent>", "exec"), self.namespace)
-                if last_expr is not None:
-                    value = eval(compile(last_expr, "<agent>", "eval"), self.namespace)
-                    if value is not None:
-                        print(repr(value) if not hasattr(value, "to_string") else value.to_string())
+            exec(compile(tree, "<agent>", "exec"), self.namespace)
+            if last_expr is not None:
+                value = eval(compile(last_expr, "<agent>", "eval"), self.namespace)
+                if value is not None:
+                    print(repr(value) if not hasattr(value, "to_string") else value.to_string())
         except _Timeout:
             result["text"] = f"Codice interrotto: superato il limite di tempo ({TIMEOUT_SECONDS}s). Evita cicli molto lunghi."
         except Exception as e:  # noqa: BLE001

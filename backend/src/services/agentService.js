@@ -39,7 +39,8 @@ export async function runAgent(history, userMessage, onEvent = () => {}, ctx = {
 
   const trace = []; // passi eseguiti, mostrati nel frontend per rendere il flusso verificabile
   const sources = [];
-  const charts = [];
+  const charts = []; // grafici: specifica JSON (React) + PNG
+  const tables = []; // tabelle JSON create dal data agent
 
   for (let step = 1; step <= config.maxAgentSteps; step++) {
     onEvent({ type: "status", stage: "thinking", label: step === 1 ? "Analizzo la richiesta" : "Valuto i risultati" });
@@ -57,7 +58,7 @@ export async function runAgent(history, userMessage, onEvent = () => {}, ctx = {
     messages.push(msg);
 
     if (!msg.tool_calls?.length) {
-      return { reply: msg.content ?? "", trace, sources: dedupeSources(sources), charts };
+      return { reply: msg.content ?? "", trace, sources: dedupeSources(sources), charts, tables };
     }
 
     // Act: esegue tutti gli strumenti richiesti in questo passo (anche in parallelo)
@@ -77,13 +78,15 @@ export async function runAgent(history, userMessage, onEvent = () => {}, ctx = {
           const out = await executeTool(name, args, ctx);
           if (out.sources) sources.push(...out.sources);
           if (out.charts) charts.push(...out.charts);
+          if (out.tables) tables.push(...out.tables);
           Object.assign(entry, {
             ok: true,
             ms: Date.now() - started,
             sources: out.sources,
             code: out.code,
             cleaning: out.cleaning,
-            charts: out.charts,
+            // nei passi bastano titolo e file: i dati del grafico sono già nel messaggio
+            charts: out.charts?.map(({ spec: _spec, ...chart }) => chart),
           });
           return { call, content: out.content, entry };
         } catch (err) {
@@ -110,7 +113,7 @@ export async function runAgent(history, userMessage, onEvent = () => {}, ctx = {
   messages.push({ role: "user", content: "Rispondi ora con le informazioni raccolte, senza usare altri strumenti." });
   const final = await openai.chat.completions.create({ model: config.chatModel, messages, temperature: 0.2 });
   recordUsage({ kind: "chat", model: final.model ?? config.chatModel, usage: final.usage });
-  return { reply: final.choices[0].message.content ?? "", trace, sources: dedupeSources(sources), charts };
+  return { reply: final.choices[0].message.content ?? "", trace, sources: dedupeSources(sources), charts, tables };
 }
 
 /** Fonti uniche (stesso documento e sezione → la più pertinente), ordinate per pertinenza. */
