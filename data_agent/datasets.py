@@ -32,6 +32,14 @@ ID_RE = re.compile(r"^[a-zA-Z0-9-]{3,64}$")
 SUPPORTED_EXT = {".csv", ".xlsx", ".xls"}
 
 
+class DatasetError(ValueError):
+    """Errore "atteso" con un messaggio scritto per l'utente (file vuoto, formato non valido...).
+
+    Si distingue dagli errori interni di pandas: il loro testo resta nei log, all'utente arriva
+    solo un messaggio generico.
+    """
+
+
 @dataclass
 class Dataset:
     id: str
@@ -66,7 +74,7 @@ def load_table(content: bytes, filename: str) -> pd.DataFrame:
         for df in sheets.values():
             if not df.dropna(how="all").empty:
                 return df
-        raise ValueError("Il file Excel non contiene dati.")
+        raise DatasetError("Il file Excel non contiene dati.")
     last_error: Exception | None = None
     for encoding in ("utf-8-sig", "latin-1"):
         try:
@@ -74,7 +82,8 @@ def load_table(content: bytes, filename: str) -> pd.DataFrame:
             return pd.read_csv(io.BytesIO(content), sep=None, engine="python", encoding=encoding)
         except Exception as e:  # noqa: BLE001
             last_error = e
-    raise ValueError(f"CSV non leggibile: {last_error}")
+    # il dettaglio di pandas (riga, numero di colonne...) resta nei log del data agent
+    raise DatasetError("CSV non leggibile: controlla che abbia una riga di intestazione e lo stesso numero di colonne in ogni riga.") from last_error
 
 
 # --------------------------------------------------------------------------- #
@@ -245,12 +254,12 @@ class DatasetStore:
 
     def add(self, dataset_id: str, title: str, filename: str, content: bytes) -> Dataset:
         if not ID_RE.match(dataset_id) or dataset_id == BUILTIN_ID:
-            raise ValueError("Identificativo del dataset non valido.")
+            raise DatasetError("Identificativo del dataset non valido.")
         if Path(filename).suffix.lower() not in SUPPORTED_EXT:
-            raise ValueError("Formato non supportato: carica un file CSV o Excel.")
+            raise DatasetError("Formato non supportato: carica un file CSV o Excel.")
         raw = load_table(content, filename)  # verifica che sia leggibile prima di salvarlo
         if raw.dropna(how="all").empty:
-            raise ValueError("Il file non contiene dati.")
+            raise DatasetError("Il file non contiene dati.")
         with self._lock:
             self._path(dataset_id, filename).write_bytes(content)
             ds = self._load(dataset_id, title, filename)

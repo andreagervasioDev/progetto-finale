@@ -7,6 +7,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
+import { logError } from "../logger.js";
 import { isValidId } from "../repositories/conversationRepository.js";
 import { handleTurn } from "../services/chatService.js";
 
@@ -35,7 +36,7 @@ function validateChatBody(req, res) {
 }
 
 function friendlyError(err) {
-  console.error("[chat] errore:", err);
+  logError("[chat] errore:", err);
   if (err?.status === 402) return err.message; // tetto di spesa raggiunto: il messaggio è già chiaro
   if (err?.status === 401) return "Chiave OpenAI non valida: controlla OPENAI_API_KEY nel file .env.";
   if (err?.status === 429) return "Limite di richieste OpenAI raggiunto, riprova tra poco.";

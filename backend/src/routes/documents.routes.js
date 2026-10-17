@@ -20,6 +20,7 @@ import { removeDataset } from "../clients/dataAgentClient.js";
 import { CATEGORIES, getCategory, isCategory } from "../documents/categories.js";
 import { SUPPORTED_TYPES, isTabular, readableContent } from "../documents/extract.js";
 import { UnsafeFileError, verifyFileContent } from "../documents/fileCheck.js";
+import { logError } from "../logger.js";
 import { deleteDocumentChunks } from "../rag/vectorStore.js";
 import {
   SYSTEM_OWNER,
@@ -58,8 +59,17 @@ function receiveFile(req, res) {
   return new Promise((resolve) => {
     upload.single("file")(req, res, async (err) => {
       if (err) {
-        const msg = err.code === "LIMIT_FILE_SIZE" ? `File troppo grande (massimo ${MAX_SIZE_MB} MB).` : err.message;
-        res.status(err.status ?? 400).json({ error: msg });
+        // solo gli errori "attesi" (limiti di multer, formato non supportato) arrivano all'utente;
+        // gli altri (es. disco pieno) contengono percorsi del server: vanno nei log
+        const expected = err instanceof multer.MulterError || err instanceof DocumentError;
+        if (!expected) logError("[documenti] ricezione del file non riuscita:", err);
+        const msg =
+          err.code === "LIMIT_FILE_SIZE"
+            ? `File troppo grande (massimo ${MAX_SIZE_MB} MB).`
+            : expected
+              ? err.message
+              : "Ricezione del file non riuscita, riprova.";
+        res.status(expected ? (err.status ?? 400) : 500).json({ error: msg });
         return resolve(null);
       }
       if (!req.file) {
@@ -73,7 +83,7 @@ function receiveFile(req, res) {
       } catch (checkErr) {
         await fs.unlink(req.file.path).catch(() => {});
         const expected = checkErr instanceof UnsafeFileError;
-        if (!expected) console.error("[documenti] controllo del file non riuscito:", checkErr.message);
+        if (!expected) logError("[documenti] controllo del file non riuscito:", checkErr);
         res.status(expected ? 422 : 400).json({ error: expected ? checkErr.message : "File non leggibile." });
         return resolve(null);
       }
@@ -146,7 +156,7 @@ documentsRouter.post("/suggest", async (req, res) => {
     const s = await suggestCategory(text, file.originalname);
     res.json({ category: s.category, title: s.title || fallbackTitle, ai: true });
   } catch (err) {
-    console.error("[documenti] proposta categoria non riuscita:", err.message);
+    logError("[documenti] proposta categoria non riuscita:", err);
     res.json({ category: "altro", title: fallbackTitle, ai: false });
   } finally {
     await fs.unlink(file.path).catch(() => {});
@@ -205,7 +215,7 @@ documentsRouter.post("/", async (req, res) => {
       if (isTabular(doc.ext)) await removeDataset(doc.id).catch(() => {});
       await removeDocument(doc.id);
     }
-    console.error("[documenti] caricamento fallito:", err.message);
+    logError("[documenti] caricamento fallito:", err);
     const expected = err instanceof DocumentError || err.status === 422;
     res
       .status(expected ? 422 : 502)
@@ -238,7 +248,7 @@ documentsRouter.patch("/:id", async (req, res) => {
     doc = await processDocument(doc);
     res.json(toPublic(doc, req.user));
   } catch (err) {
-    console.error("[documenti] modifica non riuscita:", err.message);
+    logError("[documenti] modifica non riuscita:", err);
     res.status(502).json({ error: "Modifica salvata, ma la rielaborazione non è riuscita: riprova." });
   }
 });

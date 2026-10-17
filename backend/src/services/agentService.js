@@ -10,6 +10,7 @@
  */
 import { getOpenAI } from "../clients/openaiClient.js";
 import { config } from "../config.js";
+import { logError } from "../logger.js";
 import { buildSystemPrompt } from "../prompts/systemPrompt.js";
 import { executeTool, toolDefinitionsFor } from "../tools/index.js";
 import { recordUsage } from "./usageService.js";
@@ -17,6 +18,12 @@ import { recordUsage } from "./usageService.js";
 const TOOL_LABELS = {
   search_knowledge_base: "Consulto i documenti",
   analyze_data: "Il data agent analizza i dati",
+};
+
+/** Messaggi d'errore degli strumenti mostrati all'utente (il dettaglio tecnico va solo nei log). */
+const TOOL_ERRORS = {
+  search_knowledge_base: "La ricerca nei documenti non è disponibile in questo momento (ChromaDB non risponde).",
+  analyze_data: "Il data agent non è riuscito a completare l'analisi.",
 };
 
 /**
@@ -80,8 +87,12 @@ export async function runAgent(history, userMessage, onEvent = () => {}, ctx = {
           });
           return { call, content: out.content, entry };
         } catch (err) {
-          Object.assign(entry, { ok: false, ms: Date.now() - started, error: err.message });
-          return { call, content: `ERRORE nello strumento ${name}: ${err.message}. Informa l'utente o prova un'alternativa.`, entry };
+          // il dettaglio tecnico (indirizzi interni, eccezioni Python...) resta nei log del server; nei passi
+          // salvati nella chat e mostrati all'utente, e nel testo per il modello, va solo un messaggio chiaro
+          logError(`[agente] strumento ${name} non riuscito:`, err);
+          const error = TOOL_ERRORS[name] ?? "Lo strumento non ha risposto correttamente.";
+          Object.assign(entry, { ok: false, ms: Date.now() - started, error });
+          return { call, content: `ERRORE nello strumento ${name}: ${error} Informa l'utente o prova un'alternativa.`, entry };
         }
       }),
     );

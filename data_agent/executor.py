@@ -37,6 +37,7 @@ import ctypes
 import io
 import os
 import threading
+import traceback
 
 # Import consentiti nel codice generato: solo librerie di analisi e visualizzazione.
 ALLOWED_IMPORTS = {"pandas", "numpy", "matplotlib", "matplotlib.pyplot", "seaborn", "math",
@@ -151,6 +152,23 @@ def harden_namespace(namespace: dict) -> dict:
     return ns
 
 
+def format_error(exc: BaseException, code: str) -> str:
+    """Errore del codice generato, nel formato utile al modello per correggersi.
+
+    Solo le righe del codice generato (file "<agent>") e il tipo/messaggio dell'eccezione: niente
+    percorsi assoluti delle librerie né righe interne della sandbox, che finirebbero nei passi
+    mostrati all'utente senza aiutare il modello.
+    """
+    lines = code.splitlines()
+    frames = [f for f in traceback.extract_tb(exc.__traceback__) if f.filename == "<agent>"]
+    out = ["Errore durante l'esecuzione del codice:"]
+    for frame in frames:
+        source = lines[frame.lineno - 1].strip() if frame.lineno and 0 < frame.lineno <= len(lines) else ""
+        out.append(f"  riga {frame.lineno}: {source}")
+    out.append("".join(traceback.format_exception_only(type(exc), exc)).strip())
+    return "\n".join(out)
+
+
 def _async_raise(thread_id: int, exc_type) -> None:
     """Solleva un'eccezione in un thread in esecuzione (per interromperlo allo scadere del tempo)."""
     ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(thread_id), ctypes.py_object(exc_type))
@@ -188,9 +206,8 @@ class PythonExecutor:
                         print(repr(value) if not hasattr(value, "to_string") else value.to_string())
         except _Timeout:
             result["text"] = f"Codice interrotto: superato il limite di tempo ({TIMEOUT_SECONDS}s). Evita cicli molto lunghi."
-        except Exception:
-            import traceback
-            result["text"] = (stdout.getvalue() + "\n" + traceback.format_exc(limit=2))[-MAX_OUTPUT_CHARS:]
+        except Exception as e:  # noqa: BLE001
+            result["text"] = (stdout.getvalue() + "\n" + format_error(e, code))[-MAX_OUTPUT_CHARS:]
 
     def run(self, code: str) -> str:
         try:

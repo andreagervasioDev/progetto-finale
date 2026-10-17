@@ -33,7 +33,7 @@ load_dotenv(BASE_DIR.parent / ".env")  # .env unico nella root del progetto
 
 from agent import CHARTS_DIR, SCHEMA_DESCRIPTION, PandasAgent  # noqa: E402
 from cleaning import quality_summary  # noqa: E402
-from datasets import BUILTIN_ID, Dataset, DatasetStore  # noqa: E402
+from datasets import BUILTIN_ID, Dataset, DatasetError, DatasetStore  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [data_agent] %(message)s")
 log = logging.getLogger(__name__)
@@ -132,11 +132,13 @@ async def add_dataset(id: str = Form(...), title: str = Form(...), file: UploadF
         raise HTTPException(413, f"File troppo grande (massimo {MAX_UPLOAD_MB} MB).")
     try:
         ds = await run_in_threadpool(_store().add, id, title, file.filename or "dati.csv", content)
-    except ValueError as e:
+    except DatasetError as e:
+        # messaggio scritto da noi per l'utente
         raise HTTPException(422, str(e)) from e
     except Exception as e:  # noqa: BLE001
+        # errore interno (pandas, openpyxl...): il dettaglio resta nel log, all'utente un messaggio generico
         log.exception("Dataset non leggibile")
-        raise HTTPException(422, f"Impossibile leggere il file: {e}") from e
+        raise HTTPException(422, "Impossibile leggere il file: controlla che sia un CSV o un Excel valido.") from e
     log.info("Dataset registrato: %s (%s righe, %s colonne)", title, len(ds.clean), ds.clean.shape[1])
     return ds.summary() | {"cleaning_report": ds.report.to_dict()}
 
@@ -195,8 +197,9 @@ async def analyze(req: AnalyzeRequest):
         # l'agente e' sincrono (OpenAI + exec): lo eseguo in un thread per non bloccare il server
         result = await run_in_threadpool(agent.analyze, req.question, req.context, ds)
     except Exception as e:  # errori OpenAI, rete, ecc.
+        # il dettaglio (eccezione e traccia) resta nel log del data agent
         log.exception("Errore durante l'analisi")
-        raise HTTPException(500, f"Errore del data agent: {e}") from e
+        raise HTTPException(500, "Il data agent non è riuscito a completare l'analisi.") from e
     result["elapsed_s"] = round(time.time() - t0, 1)
     log.info("Completata in %ss con %s passi e %s grafici", result["elapsed_s"], len(result["steps"]), len(result["charts"]))
     return result

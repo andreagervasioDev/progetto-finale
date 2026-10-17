@@ -13,7 +13,10 @@ const url = (p) => `${config.dataAgentUrl}${p}`;
 async function check(res) {
   if (res.ok) return res.json();
   const body = await res.json().catch(() => ({}));
-  const err = new Error(body.detail || `Data agent: HTTP ${res.status}`);
+  // i messaggi del data agent sono testi scritti per l'utente; un errore di validazione di FastAPI
+  // invece ha "detail" come elenco di oggetti, che non va mostrato così com'è
+  const detail = typeof body.detail === "string" ? body.detail : null;
+  const err = new Error(detail || `Il data agent ha risposto con un errore (HTTP ${res.status}).`);
   err.status = res.status;
   throw err;
 }

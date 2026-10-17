@@ -5,6 +5,7 @@
 import cors from "cors";
 import express from "express";
 import { config } from "./config.js";
+import { logError } from "./logger.js";
 import { requireAdmin, requireUser } from "./middleware/auth.js";
 import { activityRouter } from "./routes/activity.routes.js";
 import { adminRouter } from "./routes/admin.routes.js";
@@ -44,5 +45,15 @@ export function createApp() {
   );
 
   app.use("/api", (_req, res) => res.status(404).json({ error: "Endpoint non trovato." }));
+
+  // gestore finale degli errori: senza, Express risponderebbe con la traccia completa dell'errore
+  // (percorsi dei file sul server compresi). Al client va solo un messaggio generico, il dettaglio nei log.
+  app.use((err, req, res, _next) => {
+    if (err.type === "entity.parse.failed") return res.status(400).json({ error: "Il corpo della richiesta non è un JSON valido." });
+    if (err.type === "entity.too.large") return res.status(413).json({ error: "Richiesta troppo grande." });
+    logError(`[${req.method} ${req.originalUrl}]`, err);
+    if (res.headersSent) return res.end();
+    res.status(500).json({ error: "Si è verificato un errore interno." });
+  });
   return app;
 }
