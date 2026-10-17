@@ -5,7 +5,9 @@ async function check(res, fallback) {
   if (res.status === 401) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || fallback);
+    const err = new Error(body.error || fallback);
+    err.status = res.status; // es. 422 = file rifiutato dal controllo del contenuto
+    throw err;
   }
   return res;
 }

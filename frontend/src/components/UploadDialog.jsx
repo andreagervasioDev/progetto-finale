@@ -57,8 +57,16 @@ export default function UploadDialog({ initialFile, initialCategory, onClose, on
       setCategory(s.category);
       if (s.title) setTitle(s.title);
       setSuggestion({ ai: s.ai });
-    } catch {
-      if (ticket === picked.current) setSuggestion({ ai: false });
+    } catch (err) {
+      if (ticket !== picked.current) return;
+      // 422: il server ha rifiutato il file (contenuto diverso dall'estensione, zip bomb): lo dico subito
+      if (err.status === 422) {
+        setFile(null);
+        setSuggestion(null);
+        setError(err.message);
+        return;
+      }
+      setSuggestion({ ai: false });
     }
   };
 

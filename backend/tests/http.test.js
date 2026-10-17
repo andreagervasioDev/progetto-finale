@@ -147,6 +147,17 @@ describe("documenti", () => {
     assert.equal(res.status, 422);
     assert.match((await res.json()).error, /Formato non supportato/);
   });
+
+  test("estensione cambiata (eseguibile rinominato .pdf) → 422, senza arrivare all'AI", async () => {
+    for (const endpoint of ["/api/documents", "/api/documents/suggest"]) {
+      const form = new FormData();
+      form.append("file", new Blob([Buffer.from([0x4d, 0x5a, 0x90, 0x00, 0x03])]), "contratto.pdf");
+      const res = await fetch(base + endpoint, { method: "POST", body: form, headers: { Cookie: testCookie } });
+      assert.equal(res.status, 422, endpoint);
+      assert.match((await res.json()).error, /non corrisponde a un PDF/);
+    }
+    assert.deepEqual(await (await get("/api/documents")).json(), []); // nessun documento salvato
+  });
 });
 
 test("grafici: nomi di file non validi → 400", async () => {

@@ -19,6 +19,7 @@ import multer from "multer";
 import { removeDataset } from "../clients/dataAgentClient.js";
 import { CATEGORIES, getCategory, isCategory } from "../documents/categories.js";
 import { SUPPORTED_TYPES, isTabular, readableContent } from "../documents/extract.js";
+import { UnsafeFileError, verifyFileContent } from "../documents/fileCheck.js";
 import { deleteDocumentChunks } from "../rag/vectorStore.js";
 import {
   SYSTEM_OWNER,
@@ -49,10 +50,13 @@ const upload = multer({
   },
 });
 
-/** multer come promessa, con messaggi d'errore leggibili. */
+/**
+ * multer come promessa, con messaggi d'errore leggibili. Il file ricevuto viene subito controllato
+ * (firma del formato, zip bomb): se non è valido viene cancellato e la risposta è 422.
+ */
 function receiveFile(req, res) {
   return new Promise((resolve) => {
-    upload.single("file")(req, res, (err) => {
+    upload.single("file")(req, res, async (err) => {
       if (err) {
         const msg = err.code === "LIMIT_FILE_SIZE" ? `File troppo grande (massimo ${MAX_SIZE_MB} MB).` : err.message;
         res.status(err.status ?? 400).json({ error: msg });
@@ -64,6 +68,15 @@ function receiveFile(req, res) {
       }
       // multer decodifica i nomi come latin1: li riporto in UTF-8 (accenti nei nomi dei file)
       req.file.originalname = Buffer.from(req.file.originalname, "latin1").toString("utf8");
+      try {
+        await verifyFileContent(req.file.path, path.extname(req.file.originalname).toLowerCase());
+      } catch (checkErr) {
+        await fs.unlink(req.file.path).catch(() => {});
+        const expected = checkErr instanceof UnsafeFileError;
+        if (!expected) console.error("[documenti] controllo del file non riuscito:", checkErr.message);
+        res.status(expected ? 422 : 400).json({ error: expected ? checkErr.message : "File non leggibile." });
+        return resolve(null);
+      }
       resolve(req.file);
     });
   });
