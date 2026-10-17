@@ -1,4 +1,6 @@
-# Dipendenze per i test (pytest): pip install -r requirements-dev.txt
+# Dipendenze per i test (pytest) e per il controllo delle vulnerabilità (pip-audit):
+# pip install -r requirements-dev.txt
 -r requirements.txt
 pytest>=8.0
 httpx>=0.27
+pip-audit>=2.7

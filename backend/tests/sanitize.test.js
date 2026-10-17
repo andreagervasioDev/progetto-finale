@@ -19,12 +19,19 @@ describe("sanitizeDocxHtml: rimuove il codice ostile", () => {
     object: `<object data="evil.swf"></object>`,
     "data text/html img": `<img src="data:text/html,<script>alert(1)</script>">`,
     "style con javascript": `<p style="background:url(javascript:alert(1))">x</p>`,
+    // payload degli avvisi di sicurezza di sanitize-html <= 2.17.6 (GHSA-vccv-cmxp-4j9h,
+    // GHSA-g8qq-57p8-ggw5, GHSA-jxwj-j7wr-gfrw): restano qui contro le regressioni
+    "javascript: in action/formaction/poster/background":
+      `<form action="javascript:alert(1)"><button formaction="javascript:alert(2)">x</button></form>` +
+      `<video poster="javascript:alert(3)"></video><table background="javascript:alert(4)"><tr><td>t</td></tr></table>`,
+    "SVG SMIL animate": `<svg><a><animate attributeName="href" values="javascript:alert(1)"/><text y="20">clic</text></a></svg>`,
+    "chiusura </textarea/>": `<textarea></textarea/><img src=x onerror=alert(1)>`,
   };
 
   for (const [name, html] of Object.entries(xss)) {
     test(name, () => {
       const out = sanitizeDocxHtml(html);
-      assert.doesNotMatch(out, /<script|<iframe|<object|<svg|onclick|onerror|onload|javascript:|vbscript:|data:text\/html/i, out);
+      assert.doesNotMatch(out, /<script|<iframe|<object|<svg|<animate|<form|<textarea|onclick|onerror|onload|javascript:|vbscript:|data:text\/html/i, out);
     });
   }
 });
