@@ -443,6 +443,7 @@ cd data_agent && .venv/bin/python -m pytest -q tests             # Python (pytes
 | `data_agent/tests/test_cleaning.py` | il CSV ha ≥ 1000 righe e anomalie; dopo la pulizia 1.539 righe, niente duplicati, date, categorie e range corretti |
 | `data_agent/tests/test_executor.py` | sandbox: esecuzione del codice pandas, blocco di lettura file (`.env`), rete, scrittura su disco, import, `eval`, attributi dunder, alias delle funzioni e timeout |
 | `data_agent/tests/test_datasets.py` | pulizia dei CSV/Excel caricati: formati italiani (`€ 1.234,50`, `1.200.000`, `15%`, gg/mm/aaaa), duplicati, righe vuote |
+| `backend/tests/sanitize.test.js` | pulizia dell'HTML dei file Word: rimozione di script, gestori di eventi, iframe, link `javascript:` e immagini `data:text/html`; formattazione legittima conservata |
 | `data_agent/tests/test_api.py` | API FastAPI: health, panoramica, caricamento e rimozione di un dataset, validazione di `/analyze` |
 
 ---
@@ -635,7 +636,7 @@ curl -X POST http://localhost:3002/api/chat \
 
   Queste barriere sono verificate da `data_agent/tests/test_executor.py` (lettura del `.env`, accesso alla rete, scrittura su disco, evasione via dunder, alias delle funzioni, timeout).
   *Limite noto*: non è una sandbox a livello di sistema operativo. Resta fuori portata il limite di memoria rigido e l'interruzione di un ciclo infinito "puro" senza I/O (Python non termina un thread dall'esterno). In produzione il data agent va comunque eseguito in un container isolato, senza rete e senza segreti nell'ambiente, con limiti di CPU e memoria imposti dal sistema.
-- **Upload**: solo estensioni consentite (PDF, DOCX, TXT, MD, CSV, XLSX, XLS), massimo 20 MB, file salvati con nome casuale (id) fuori dalla cartella pubblica. Se l'indicizzazione fallisce, il caricamento viene annullato senza lasciare documenti a metà. Nell'HTML ricavato dai file Word vengono neutralizzati i link `javascript:`; il Markdown è mostrato senza HTML grezzo.
+- **Upload**: solo estensioni consentite (PDF, DOCX, TXT, MD, CSV, XLSX, XLS), massimo 20 MB, file salvati con nome casuale (id) fuori dalla cartella pubblica. Se l'indicizzazione fallisce, il caricamento viene annullato senza lasciare documenti a metà. L'HTML ricavato dai file Word (un .docx non è fidato) viene mostrato nel lettore dopo una **sanitizzazione** con `sanitize-html`: si conserva solo una whitelist di tag e attributi di formattazione (titoli, paragrafi, liste, tabelle, grassetto/corsivo, link, immagini), mentre `<script>`, i gestori di eventi (`onclick`...), gli `<iframe>`, i link `javascript:`/`vbscript:` e le immagini `data:text/html` vengono rimossi. I link esterni si aprono con `rel="noopener"`. Verificato da `backend/tests/sanitize.test.js`. Il Markdown è mostrato senza HTML grezzo.
 - Il data agent ascolta solo su `127.0.0.1`. Il backend valida l'input (lunghezza massima) e i nomi dei file dei grafici (regex, niente path traversal) e limita CORS all'origine del frontend.
 - **Dati sensibili** (certificati medici, contratti, offerte di mercato): i file restano sul computer che esegue la piattaforma, ma i pezzi di testo vengono inviati a OpenAI per gli embedding, per l'estrazione dei dati chiave e, quando pertinenti, per le risposte. L'archivio è condiviso tra tutti gli utenti collegati. Per un uso reale servirebbero permessi per categoria (il filtro `ownerId`/`visibility` è già presente nei metadati), un accordo sul trattamento dei dati con il provider o un modello eseguito in locale.
 
@@ -643,7 +644,8 @@ curl -X POST http://localhost:3002/api/chat \
 
 ## 16. Limiti noti
 
-- **Accesso semplice.** Due ruoli (utente e admin), utenti creati al primo avvio, nessuna gestione degli utenti dall'interfaccia né cambio password; l'archivio documenti è condiviso. Il cookie non è `Secure` perché l'app gira in HTTP su localhost: in rete andrebbe servita in HTTPS.
+- **Accesso semplice.** Due ruoli (utente e admin), utenti creati al primo avvio, nessuna gestione degli utenti dall'interfaccia né cambio password; l'archivio documenti è condiviso.
+- **Protezioni solo per il deploy online, qui non applicabili.** L'app è pensata per l'uso **in locale** (HTTP su `localhost`), quindi non ha: HTTPS e cookie `Secure`, `Content-Security-Policy`, `HSTS`, protezione anti-clickjacking (`X-Frame-Options`). Sono misure che hanno senso solo con un dominio pubblico esposto in rete; andrebbero aggiunte prima di un eventuale deploy. La protezione che conta anche in locale — la sanitizzazione dell'HTML dei documenti Word — **è invece attiva** (vedi [Sicurezza](#15-sicurezza)).
 - **Spesa stimata.** I costi sono calcolati dai token con un listino nel codice (`usageService.js`): la cifra fatturata è quella della dashboard OpenAI. I consumi si registrano da questa versione in poi.
 - **Sandbox del codice solo applicativa.** I controlli AST di `executor.py` bloccano le operazioni pericolose più comuni ma non sostituiscono un container isolato, senza rete e con limiti di CPU e memoria.
 - **Dati chiave estratti dall'AI.** Viene letta solo la parte iniziale del documento (circa 6.000 caratteri) e si estrae **una sola** scadenza per documento; i valori non si correggono a mano. La scheda nel lettore lo segnala ("da verificare sul documento").
