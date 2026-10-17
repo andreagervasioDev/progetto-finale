@@ -108,7 +108,14 @@ function Overview() {
   const kpis = [
     { label: "Spesa AI totale", value: usd(u.total.costUsd), hint: `${tokens(u.total.inputTokens + u.total.outputTokens)} token` },
     { label: "Ultimi 30 giorni", value: usd(u.last30Days.costUsd), hint: `${num(u.last30Days.calls)} chiamate al modello` },
-    { label: "Oggi", value: usd(u.today.costUsd), hint: `${tokens(u.today.inputTokens + u.today.outputTokens)} token` },
+    {
+      label: "Oggi",
+      value: usd(u.today.costUsd),
+      hint: data.dailyBudgetUsd
+        ? `tetto ${usd(data.dailyBudgetUsd, 0)}/giorno`
+        : `${tokens(u.today.inputTokens + u.today.outputTokens)} token`,
+      warn: data.dailyBudgetUsd && u.today.costUsd >= data.dailyBudgetUsd,
+    },
     { label: "Costo medio per domanda", value: usd(data.costPerQuestionUsd, 4), hint: `${num(data.activity.questions)} domande in totale` },
     { label: "Utenti", value: num(data.users), hint: `${num(data.activity.logins)} accessi` },
     { label: "Documenti in archivio", value: num(data.documents), hint: `${num(data.activity.uploads)} caricamenti` },
@@ -118,7 +125,7 @@ function Overview() {
     <>
       <section className="kpis admin-kpis">
         {kpis.map((k) => (
-          <div key={k.label} className="kpi">
+          <div key={k.label} className={`kpi ${k.warn ? "kpi-warn" : ""}`}>
             <span>{k.label}</span>
             <strong>{k.value}</strong>
             <small>{k.hint}</small>

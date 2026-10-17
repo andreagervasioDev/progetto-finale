@@ -31,6 +31,8 @@ export const config = {
   dataAgentTimeoutMs: Number(process.env.DATA_AGENT_TIMEOUT_MS || 180000),
   maxAgentSteps: Number(process.env.MAX_AGENT_STEPS || 6),
   maxHistoryMessages: Number(process.env.MAX_HISTORY_MESSAGES || 20),
+  // tetto di spesa OpenAI stimata al giorno, in dollari; 0 = nessun limite (rete di sicurezza contro consumi imprevisti)
+  dailyBudgetUsd: Number(process.env.DAILY_BUDGET_USD || 0),
   auth: {
     // chiave per firmare le sessioni: se manca viene generata e salvata in storage/.auth_secret
     secret: process.env.AUTH_SECRET || null,

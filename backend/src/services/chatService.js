@@ -9,6 +9,7 @@ import { canRead, getDocument, listVisible } from "../repositories/documentRepos
 import { logActivity } from "./activityService.js";
 import { runAgent } from "./agentService.js";
 import { availableDatasets } from "./datasetService.js";
+import { assertWithinBudget } from "./usageService.js";
 
 /**
  * @param {object} user  profilo che fa la domanda
@@ -16,6 +17,8 @@ import { availableDatasets } from "./datasetService.js";
  * @param {(event: object) => void} [onEvent]  aggiornamenti di stato per lo streaming
  */
 export async function handleTurn(user, { sessionId, message, docId }, onEvent) {
+  // rete di sicurezza: se la spesa stimata di oggi ha raggiunto il tetto, non si avvia il turno
+  await assertWithinBudget();
   const userId = user.id;
   // elemento aperto: un documento (la ricerca può limitarsi a quello) o un file di dati (dataset predefinito)
   const opened = docId ? await getDocument(docId) : null;

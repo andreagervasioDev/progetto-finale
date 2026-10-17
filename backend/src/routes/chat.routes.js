@@ -36,6 +36,7 @@ function validateChatBody(req, res) {
 
 function friendlyError(err) {
   console.error("[chat] errore:", err);
+  if (err?.status === 402) return err.message; // tetto di spesa raggiunto: il messaggio è già chiaro
   if (err?.status === 401) return "Chiave OpenAI non valida: controlla OPENAI_API_KEY nel file .env.";
   if (err?.status === 429) return "Limite di richieste OpenAI raggiunto, riprova tra poco.";
   return "Si è verificato un errore durante l'elaborazione della richiesta.";
@@ -49,7 +50,8 @@ chatRouter.post("/", async (req, res) => {
   try {
     res.json(await handleTurn(req.user, body));
   } catch (err) {
-    res.status(500).json({ error: friendlyError(err) });
+    // il tetto di spesa (402) e altri errori con status noto lo propagano; gli altri sono 500
+    res.status(err?.status === 402 ? 402 : 500).json({ error: friendlyError(err) });
   }
 });
 

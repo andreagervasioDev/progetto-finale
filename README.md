@@ -312,6 +312,7 @@ OPENAI_API_KEY=sk-...la-tua-chiave...
 | `MAX_AGENT_STEPS` | `6` | Passi ReAct massimi dell'orchestratore |
 | `DATA_AGENT_MAX_STEPS` | `8` | Passi ReAct massimi del pandas agent |
 | `MAX_HISTORY_MESSAGES` | `20` | Messaggi di cronologia inviati all'LLM |
+| `DAILY_BUDGET_USD` | `0` | Tetto di spesa OpenAI stimata al giorno (dollari); `0` = nessun limite |
 | `DEFAULT_ADMIN_PASSWORD` / `DEFAULT_TEST_PASSWORD` | `admin` / `test` | Password degli utenti creati al primo avvio |
 | `AUTH_SECRET` | generata | Chiave che firma le sessioni; se manca viene creata in `backend/storage/.auth_secret` |
 | `SESSION_DAYS` | `7` | Durata della sessione dopo il login |
@@ -440,6 +441,7 @@ cd data_agent && .venv/bin/python -m pytest -q tests             # Python (pytes
 | `backend/tests/agent.test.js` | definizione dei tool per il function calling, contenuto del system prompt, fonti |
 | `backend/tests/http.test.js` | API reali su una porta casuale: login e sessione (401, cookie manomesso, blocco dopo 5 tentativi), permessi admin (403), storico delle ricerche, validazione della chat, upload rifiutati, path traversal |
 | `backend/tests/usage.test.js` | hash delle password, firma e scadenza delle sessioni, prezzi dei modelli, calcolo della spesa e riepiloghi della dashboard |
+| `backend/tests/budget.test.js` | tetto di spesa giornaliero: somma della spesa di oggi e blocco (402) al raggiungimento del limite |
 | `data_agent/tests/test_cleaning.py` | il CSV ha ≥ 1000 righe e anomalie; dopo la pulizia 1.539 righe, niente duplicati, date, categorie e range corretti |
 | `data_agent/tests/test_executor.py` | sandbox: esecuzione del codice pandas, blocco di lettura file (`.env`), rete, scrittura su disco, import, `eval`, attributi dunder, alias delle funzioni e timeout |
 | `data_agent/tests/test_datasets.py` | pulizia dei CSV/Excel caricati: formati italiani (`€ 1.234,50`, `1.200.000`, `15%`, gg/mm/aaaa), duplicati, righe vuote |
@@ -653,7 +655,7 @@ curl -X POST http://localhost:3002/api/chat \
 - **Excel.** Viene letto solo il primo foglio con dati.
 - **PDF scansionati.** Senza OCR non contengono testo e vengono rifiutati.
 - **Dati inviati a OpenAI.** Embedding, estrazione dei dati chiave e risposte passano dal provider (vedi [Sicurezza](#15-sicurezza)).
-- **Costi.** Non c'è un limite di richieste: ogni domanda usa il modello di chat e, per le analisi, il pandas agent (2-5 chiamate). L'admin vede la spesa ma non può impostare un tetto.
+- **Costi.** Un **tetto di spesa giornaliero** (`DAILY_BUDGET_USD`, default 0 = nessun limite) sospende le nuove richieste all'AI quando la spesa stimata di oggi raggiunge la soglia; la card "Oggi" nella dashboard diventa rossa. È una rete di sicurezza contro consumi imprevisti, non un limite per utente: la stima si basa sui prezzi di listino, quindi tienila un po' sotto il budget reale.
 - **Avvio con un comando** (`npm run setup`, `npm run dev`, `npm test`) solo su macOS e Linux; su Windows si usano i comandi separati.
 
 ---

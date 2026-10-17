@@ -35,6 +35,7 @@ import { logActivity } from "../services/activityService.js";
 import { upcomingDeadlines } from "../services/deadlineService.js";
 import { suggestCategory } from "../services/documentAiService.js";
 import { DocumentError, plainText, processDocument } from "../services/documentService.js";
+import { assertWithinBudget } from "../services/usageService.js";
 
 const MAX_SIZE_MB = 20;
 
@@ -125,6 +126,10 @@ documentsRouter.post("/suggest", async (req, res) => {
     if (isTabular(ext)) return res.json({ category: "dati", title: fallbackTitle, ai: false });
     const text = await plainText(file.path, ext);
     if (!text.trim()) return res.json({ category: "altro", title: fallbackTitle, ai: false });
+    // fuori budget: niente proposta dall'AI, si parte da una categoria neutra (l'utente sceglie)
+    await assertWithinBudget().catch(() => {
+      throw new DocumentError("Tetto di spesa giornaliero raggiunto: scegli tu la categoria.");
+    });
     const s = await suggestCategory(text, file.originalname);
     res.json({ category: s.category, title: s.title || fallbackTitle, ai: true });
   } catch (err) {
@@ -141,6 +146,16 @@ documentsRouter.post("/", async (req, res) => {
 
   const originalName = file.originalname;
   const ext = path.extname(originalName).toLowerCase();
+  // i documenti di testo richiedono embedding (ed estrazione dati chiave): se fuori budget, si rifiuta
+  // prima di salvare il file. I file di dati (CSV/Excel) non usano OpenAI, quindi passano sempre.
+  if (!isTabular(ext)) {
+    try {
+      await assertWithinBudget();
+    } catch (err) {
+      await fs.unlink(file.path).catch(() => {});
+      return res.status(err.status ?? 402).json({ error: err.message });
+    }
+  }
   // i file di dati vanno sempre nella categoria "dati"; i documenti di testo mai
   let category = isCategory(req.body.category) ? req.body.category : "altro";
   if (isTabular(ext)) category = "dati";

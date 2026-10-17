@@ -51,6 +51,7 @@ adminRouter.get("/overview", async (_req, res) => {
       failedLogins: count("login_failed", true),
     },
     costPerQuestionUsd: questions ? usage.total.costUsd / questions : null,
+    dailyBudgetUsd: config.dailyBudgetUsd || null, // tetto di spesa giornaliero, o null se non impostato
     users: users.length,
     documents: docs.length,
   });

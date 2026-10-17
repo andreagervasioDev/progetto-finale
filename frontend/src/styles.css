@@ -3320,6 +3320,17 @@ pre.output {
   font-size: 12.5px;
 }
 
+/* tetto di spesa raggiunto: la card "Oggi" si colora di allerta */
+.admin-kpis .kpi.kpi-warn {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.admin-kpis .kpi.kpi-warn strong,
+.admin-kpis .kpi.kpi-warn small {
+  color: var(--danger);
+}
+
 .admin-grid {
   grid-template-columns: 1fr 1fr;
   margin-bottom: 18px;

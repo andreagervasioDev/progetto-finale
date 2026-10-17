@@ -7,6 +7,7 @@
  *   documenti  → AI sui documenti (proposta di categoria, estrazione dei dati chiave)
  *   embedding  → indicizzazione dei documenti e ricerche nella knowledge base
  */
+import { config } from "../config.js";
 import { usageLog } from "../repositories/eventLogRepository.js";
 import { currentUserId } from "./requestContext.js";
 
@@ -48,7 +49,7 @@ export function recordUsage({ kind, model, usage, userId }) {
   const inputTokens = Number(usage?.prompt_tokens) || 0;
   const outputTokens = Number(usage?.completion_tokens) || 0;
   if (!inputTokens && !outputTokens) return;
-  usageLog.append({
+  return usageLog.append({
     userId: userId ?? currentUserId(),
     kind,
     model,
@@ -110,3 +111,44 @@ export function summarizeUsage(events, { now = Date.now(), days = 30 } = {}) {
 }
 
 export const readUsage = () => usageLog.readAll();
+
+/* ------------------------------------------------------------------ */
+/* Tetto di spesa giornaliero                                          */
+/* ------------------------------------------------------------------ */
+
+/** Errore sollevato quando la spesa stimata di oggi supera il tetto configurato. */
+export class BudgetExceededError extends Error {
+  status = 402; // Payment Required
+  constructor(spent, limit) {
+    super(
+      `Tetto di spesa giornaliero raggiunto (stimati $${spent.toFixed(2)} di $${limit.toFixed(2)}). ` +
+        "Le nuove richieste all'AI sono sospese fino a domani. Il limite si imposta con DAILY_BUDGET_USD nel file .env.",
+    );
+    this.spent = spent;
+    this.limit = limit;
+  }
+}
+
+/** Spesa stimata (in dollari) di oggi a partire da un elenco di eventi (funzione pura, testabile). */
+export function spentOn(events, now = Date.now()) {
+  const today = dayKey(now);
+  return events.filter((e) => dayKey(e.ts) === today).reduce((s, e) => s + (e.costUsd ?? 0), 0);
+}
+
+/** Spesa stimata (in dollari) delle chiamate di oggi, letta dal registro consumi. */
+export async function spentTodayUsd(now = Date.now()) {
+  return spentOn(await usageLog.readAll(), now);
+}
+
+/**
+ * Blocca se la spesa di oggi ha già raggiunto il tetto. Il controllo è PRIMA della chiamata:
+ * una singola richiesta può sforare un po' il limite, ma le successive vengono fermate.
+ * Con DAILY_BUDGET_USD = 0 (default) non c'è alcun limite.
+ * @param {number} [spent] spesa odierna già nota (per i test); se omessa, viene letta dal registro.
+ */
+export async function assertWithinBudget(spent) {
+  const limit = config.dailyBudgetUsd;
+  if (!limit || limit <= 0) return;
+  const spentToday = spent ?? (await spentTodayUsd());
+  if (spentToday >= limit) throw new BudgetExceededError(spentToday, limit);
+}
