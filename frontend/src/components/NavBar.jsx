@@ -10,6 +10,7 @@ const LINKS = [
   { to: "/dati", label: "Dati", icon: "data" },
 ];
 
+/** Menu di navigazione principale (a sinistra; a scomparsa su mobile). */
 const initials = (name) =>
   name
     .split(/\s+/)
@@ -17,8 +18,7 @@ const initials = (name) =>
     .map((p) => p[0]?.toUpperCase())
     .join("");
 
-/** Menu di navigazione principale (a sinistra; a scomparsa su mobile). */
-export default function NavBar({ user, open, onClose }) {
+export default function NavBar({ open, onClose, user, onLogout }) {
   const { pathname } = useLocation();
   const [docCount, setDocCount] = useState(null);
 
@@ -49,18 +49,27 @@ export default function NavBar({ user, open, onClose }) {
               {l.to === "/documenti" && docCount ? <span className="nav-count">{docCount}</span> : null}
             </NavLink>
           ))}
+          {user.isAdmin && (
+            <NavLink to="/admin" className="nav-link" onClick={onClose}>
+              <Icon name="shield" size={19} />
+              Amministrazione
+            </NavLink>
+          )}
         </nav>
 
         <div className="nav-spacer" />
 
-        <div className="user-card">
-          <span className="user-avatar" aria-hidden="true">
+        <div className="nav-account">
+          <span className="nav-avatar" aria-hidden="true">
             {initials(user.name)}
           </span>
-          <div className="user-info">
+          <span className="nav-account-text">
             <strong title={user.name}>{user.name}</strong>
-            <span>{user.role}</span>
-          </div>
+            <small>{user.isAdmin ? "Amministratore" : user.role}</small>
+          </span>
+          <button className="nav-logout" onClick={onLogout} title="Esci" aria-label="Esci">
+            <Icon name="logout" size={17} />
+          </button>
         </div>
       </aside>
     </>

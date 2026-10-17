@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { deleteDocument, documentFileUrl, getCategories, listDocuments } from "../api.js";
+import { deleteDocument, documentFileUrl, getCategories, listDocuments, logSearch } from "../api.js";
 import BallLoader from "../components/BallLoader.jsx";
 import Icon from "../components/Icon.jsx";
 import TypeBadge from "../components/TypeBadge.jsx";
@@ -28,8 +28,7 @@ export default function DocumentsPage() {
   const [docs, setDocs] = useState(null);
   const [categories, setCategories] = useState([]);
   const [query, setQuery] = useState(() => params.get("q") ?? "");
-  const [upload, setUpload] = useState(null); // null | { file?: File }
-  const [dragging, setDragging] = useState(false);
+  const [upload, setUpload] = useState(false);
   const active = params.get("categoria") || "tutti";
 
   const load = useCallback(() => {
@@ -42,6 +41,14 @@ export default function DocumentsPage() {
   }, [handleError]);
 
   useEffect(load, [load]);
+
+  // la ricerca viene registrata nello storico (amministratore) quando l'utente smette di scrivere
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 3) return;
+    const t = setTimeout(() => logSearch(q, "documenti"), 1500);
+    return () => clearTimeout(t);
+  }, [query]);
   useEffect(() => {
     getCategories().then(setCategories).catch(handleError);
   }, [handleError]);
@@ -75,24 +82,9 @@ export default function DocumentsPage() {
     }
   };
 
-  // drag & drop di un file in qualsiasi punto della pagina
-  const onDrop = (e) => {
-    e.preventDefault();
-    setDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) setUpload({ file });
-  };
-
   return (
-    <div
-      className={`page ${dragging ? "dragging" : ""}`}
-      onDragOver={(e) => {
-        e.preventDefault();
-        setDragging(true);
-      }}
-      onDragLeave={(e) => e.currentTarget === e.target && setDragging(false)}
-      onDrop={onDrop}
-    >
+    // il trascinamento dei file è gestito in tutta l'app da FileDropUpload
+    <div className="page">
       <header className="page-header">
         <div>
           <h1>Documenti</h1>
@@ -101,7 +93,7 @@ export default function DocumentsPage() {
             analizza i file Excel e CSV.
           </p>
         </div>
-        <button className="btn primary" onClick={() => setUpload({})}>
+        <button className="btn primary" onClick={() => setUpload(true)}>
           <Icon name="upload" size={17} /> Carica documento
         </button>
       </header>
@@ -185,21 +177,12 @@ export default function DocumentsPage() {
         </div>
       </div>
 
-      {dragging && (
-        <div className="drop-overlay">
-          <Icon name="upload" size={40} />
-          <strong>Rilascia il file per caricarlo</strong>
-          <span>PDF, Word, TXT, Markdown, Excel o CSV</span>
-        </div>
-      )}
-
       {upload && (
         <UploadDialog
-          initialFile={upload.file}
           initialCategory={active !== "tutti" ? active : undefined}
-          onClose={() => setUpload(null)}
+          onClose={() => setUpload(false)}
           onUploaded={(doc) => {
-            setUpload(null);
+            setUpload(false);
             navigate(`/documenti/${doc.id}`);
           }}
         />

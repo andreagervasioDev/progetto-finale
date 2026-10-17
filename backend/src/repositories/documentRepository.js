@@ -37,7 +37,8 @@ async function persist() {
 export const filePathOf = (doc) => path.join(FILES_DIR, `${doc.id}${doc.ext}`);
 
 export const canRead = (doc, user) => doc.visibility === "club" || doc.ownerId === user.id;
-export const canDelete = (doc, user) => doc.ownerId !== SYSTEM_OWNER && doc.ownerId === user.id;
+// i documenti ufficiali non si eliminano dall'app; quelli caricati li elimina chi li ha caricati o un amministratore
+export const canDelete = (doc, user) => doc.ownerId !== SYSTEM_OWNER && (doc.ownerId === user.id || Boolean(user.isAdmin));
 
 /** Documenti visibili all'utente: quelli del club + i suoi privati, più recenti prima. */
 export async function listVisible(user) {

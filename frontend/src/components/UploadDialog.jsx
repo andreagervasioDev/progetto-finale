@@ -21,6 +21,7 @@ export default function UploadDialog({ initialFile, initialCategory, onClose, on
   const [suggestion, setSuggestion] = useState(null); // null | "loading" | { ai: boolean }
   const [progress, setProgress] = useState(null); // null | 0..1 | "processing"
   const [error, setError] = useState("");
+  const [over, setOver] = useState(false); // file trascinato sopra il riquadro
   const inputRef = useRef(null);
   const picked = useRef(0); // per ignorare proposte arrivate per un file già sostituito
 
@@ -102,19 +103,29 @@ export default function UploadDialog({ initialFile, initialCategory, onClose, on
 
         <button
           type="button"
-          className={`file-picker ${file ? "has-file" : ""}`}
+          className={`file-picker ${file ? "has-file" : ""} ${over ? "drag-over" : ""}`}
           onClick={() => inputRef.current?.click()}
           disabled={busy}
+          onDragOver={(e) => {
+            e.preventDefault();
+            if (!busy) setOver(true);
+          }}
+          onDragLeave={() => setOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setOver(false);
+            if (!busy) pick(e.dataTransfer.files?.[0]);
+          }}
         >
           <Icon name={file ? "file" : "upload"} size={26} />
           {file ? (
             <span>
               <strong>{file.name}</strong>
-              <small>{formatSize(file.size)} · clicca per cambiare file</small>
+              <small>{formatSize(file.size)} · trascina un altro file o clicca per cambiarlo</small>
             </span>
           ) : (
             <span>
-              <strong>Scegli un file dal computer</strong>
+              <strong>{over ? "Rilascia qui il file" : "Trascina qui il file oppure clicca per sceglierlo"}</strong>
               <small>PDF, Word, TXT, Markdown, Excel o CSV · massimo {MAX_SIZE_MB} MB</small>
             </span>
           )}

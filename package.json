@@ -5,13 +5,16 @@
   "description": "Management AI: agente AI ibrido (RAG + pandas agent) per la gestione di un club di calcio",
   "scripts": {
     "setup": "npm install && npm --prefix backend install && npm --prefix frontend install && npm run setup:python",
-    "setup:python": "cd data_agent && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt",
+    "setup:python": "cd data_agent && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt",
     "dev": "concurrently -k -n chroma,agent,backend,frontend -c magenta,green,blue,yellow \"npm run chroma\" \"npm run agent\" \"npm run backend\" \"npm run frontend\"",
     "chroma": "npm --prefix backend run chroma",
     "agent": "cd data_agent && .venv/bin/python app.py",
     "backend": "npm --prefix backend run dev",
     "frontend": "npm --prefix frontend run dev",
-    "ingest": "npm --prefix backend run ingest:reset"
+    "ingest": "npm --prefix backend run ingest:reset",
+    "test": "npm run test:backend && npm run test:agent",
+    "test:backend": "npm --prefix backend test",
+    "test:agent": "cd data_agent && .venv/bin/python -m pytest -q tests"
   },
   "devDependencies": {
     "concurrently": "^10.0.5"

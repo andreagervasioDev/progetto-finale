@@ -1,4 +1,8 @@
+/** Evento globale: la sessione è scaduta o mancante → l'app torna alla pagina di login. */
+export const UNAUTHORIZED_EVENT = "managementai:unauthorized";
+
 async function check(res, fallback) {
+  if (res.status === 401) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || fallback);
@@ -63,11 +67,38 @@ export async function deleteConversation(id) {
   await check(await fetch(`/api/conversations/${id}`, { method: "DELETE" }), "Eliminazione non riuscita");
 }
 
-/* ---------------- Profilo ---------------- */
+/* ---------------- Accesso e profilo ---------------- */
 
+/** Profilo dell'utente collegato; null se non c'è una sessione valida. Lancia un errore se il backend non risponde. */
 export async function getMe() {
-  const res = await check(await fetch("/api/me"), "Backend non raggiungibile");
+  const res = await fetch("/api/me");
+  if (res.status === 401) return null;
+  await check(res, "Backend non raggiungibile");
   return res.json();
+}
+
+export async function login(username, password) {
+  const res = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "Accesso non riuscito");
+  return body;
+}
+
+export async function logout() {
+  await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+}
+
+/** Registra una ricerca nell'archivio (storico consultabile dall'amministratore). */
+export function logSearch(query, source) {
+  fetch("/api/activity/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, source }),
+  }).catch(() => {});
 }
 
 /* ---------------- Documenti ---------------- */
@@ -135,6 +166,7 @@ export function uploadDocument({ file, title, category, onProgress }) {
     xhr.open("POST", "/api/documents");
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress?.(e.loaded / e.total);
     xhr.onload = () => {
+      if (xhr.status === 401) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
       let data = {};
       try {
         data = JSON.parse(xhr.responseText);
@@ -163,3 +195,16 @@ export async function getDatasetOverview(id, rows = 50) {
 
 /** Compatibilità: panoramica del dataset partite. */
 export const getDataOverview = (rows = 50) => getDatasetOverview("partite", rows);
+
+/* ---------------- Amministrazione ---------------- */
+
+const adminGet = async (path, fallback) => (await check(await fetch(`/api/admin${path}`), fallback)).json();
+
+export const getAdminOverview = () => adminGet("/overview", "KPI non disponibili");
+export const getAdminUsers = () => adminGet("/users", "Utenti non disponibili");
+export const getAdminActivity = ({ userId = "", type = "", limit = 300 } = {}) =>
+  adminGet(`/activity?${new URLSearchParams({ userId, type, limit })}`, "Attività non disponibili");
+export const getAdminConversations = (userId = "") =>
+  adminGet(`/conversations${userId ? `?userId=${encodeURIComponent(userId)}` : ""}`, "Conversazioni non disponibili");
+export const getAdminConversation = (userId, id) =>
+  adminGet(`/conversations/${encodeURIComponent(userId)}/${encodeURIComponent(id)}`, "Conversazione non disponibile");

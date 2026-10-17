@@ -6,8 +6,9 @@
  * Entrambe sono "best effort": se l'AI non risponde il caricamento prosegue senza.
  */
 import { config } from "../config.js";
-import { getOpenAI } from "../openaiClient.js";
-import { CATEGORIES, TEXT_CATEGORY_IDS, isCategory } from "./categories.js";
+import { getOpenAI } from "../clients/openaiClient.js";
+import { CATEGORIES, TEXT_CATEGORY_IDS, isCategory } from "../documents/categories.js";
+import { recordUsage } from "./usageService.js";
 
 const MAX_CHARS = 6000;
 
@@ -21,6 +22,7 @@ async function askJson(system, user) {
       { role: "user", content: user },
     ],
   });
+  recordUsage({ kind: "documenti", model: res.model ?? config.chatModel, usage: res.usage });
   return JSON.parse(res.choices[0].message.content || "{}");
 }
 
@@ -33,9 +35,14 @@ export async function suggestCategory(text, fileName) {
       `Rispondi in JSON: {"category": "<id>", "title": "<titolo breve e chiaro in italiano, max 70 caratteri>"}`,
     `Nome file: ${fileName}\n\nInizio del documento:\n${text.slice(0, 3000)}`,
   );
+  return normalizeSuggestion(out);
+}
+
+/** Risposta dell'AI → { category, title } valida (categoria sconosciuta → "altro"). */
+export function normalizeSuggestion(out) {
   return {
-    category: isCategory(out.category) ? out.category : "altro",
-    title: typeof out.title === "string" ? out.title.trim().slice(0, 120) : "",
+    category: isCategory(out?.category) && out.category !== "dati" ? out.category : "altro",
+    title: typeof out?.title === "string" ? out.title.trim().slice(0, 120) : "",
   };
 }
 
@@ -56,11 +63,16 @@ Rispondi in JSON con queste chiavi (usa null se il dato non c'è, non inventare 
 }`,
     text.slice(0, MAX_CHARS),
   );
+  return normalizeFacts(out);
+}
+
+/** Risposta dell'AI → dati chiave validati (tipi, data ISO); null se l'AI non ha trovato nulla. */
+export function normalizeFacts(out) {
   const facts = {
     summary: typeof out.summary === "string" ? out.summary.slice(0, 200) : null,
     subject: typeof out.subject === "string" ? out.subject : null,
     counterparty: typeof out.counterparty === "string" ? out.counterparty : null,
-    amount: Number.isFinite(Number(out.amount)) && out.amount !== null ? Number(out.amount) : null,
+    amount: out.amount !== null && out.amount !== "" && Number.isFinite(Number(out.amount)) ? Number(out.amount) : null,
     amountLabel: typeof out.amount_label === "string" ? out.amount_label : null,
     expiryDate: typeof out.expiry_date === "string" && ISO_DATE.test(out.expiry_date) ? out.expiry_date : null,
     expiryLabel: typeof out.expiry_label === "string" ? out.expiry_label : null,

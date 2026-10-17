@@ -141,6 +141,7 @@ class PandasAgent:
         charts: list[dict] = []
         executor = PythonExecutor(self._new_namespace(ds, charts))
         steps: list[dict] = []
+        usage: dict[str, dict] = {}  # token consumati per modello, restituiti al backend per i KPI di spesa
 
         user_msg = question if not context else f"{question}\n\nContesto aggiuntivo fornito dall'orchestratore:\n{context}"
         messages = [{"role": "system", "content": build_system_prompt(ds)}, {"role": "user", "content": user_msg}]
@@ -148,11 +149,12 @@ class PandasAgent:
         for _ in range(MAX_STEPS):
             resp = self.client.chat.completions.create(
                 model=self.model, messages=messages, tools=TOOLS, temperature=0)
+            _add_usage(usage, resp, self.model)
             msg = resp.choices[0].message
             messages.append(msg.model_dump(exclude_none=True))
 
             if not msg.tool_calls:
-                return self._result(msg.content or "", steps, charts, ds)
+                return self._result(msg.content or "", steps, charts, ds, usage)
 
             for call in msg.tool_calls:
                 try:
@@ -168,9 +170,10 @@ class PandasAgent:
         messages.append({"role": "user", "content": "Hai raggiunto il numero massimo di passi. "
                                                     "Scrivi ora la risposta finale con i risultati ottenuti."})
         resp = self.client.chat.completions.create(model=self.model, messages=messages, temperature=0)
-        return self._result(resp.choices[0].message.content or "", steps, charts, ds)
+        _add_usage(usage, resp, self.model)
+        return self._result(resp.choices[0].message.content or "", steps, charts, ds, usage)
 
-    def _result(self, answer: str, steps: list[dict], charts: list[dict], ds: Dataset) -> dict:
+    def _result(self, answer: str, steps: list[dict], charts: list[dict], ds: Dataset, usage: dict) -> dict:
         plt.close("all")
         return {
             "answer": answer.strip(),
@@ -178,4 +181,16 @@ class PandasAgent:
             "steps": steps,
             "dataset": {"id": ds.id, "title": ds.title},
             "cleaning_report": ds.report.to_dict(),
+            "usage": list(usage.values()),
         }
+
+
+def _add_usage(usage: dict, resp, default_model: str) -> None:
+    """Somma i token di una risposta OpenAI per modello."""
+    if not getattr(resp, "usage", None):
+        return
+    model = getattr(resp, "model", None) or default_model
+    entry = usage.setdefault(model, {"model": model, "prompt_tokens": 0, "completion_tokens": 0, "calls": 0})
+    entry["prompt_tokens"] += resp.usage.prompt_tokens or 0
+    entry["completion_tokens"] += resp.usage.completion_tokens or 0
+    entry["calls"] += 1

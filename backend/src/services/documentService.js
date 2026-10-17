@@ -14,9 +14,9 @@ import path from "node:path";
 import { config } from "../config.js";
 import { chunkMarkdown, chunkPlainText } from "../rag/chunker.js";
 import { deleteChunkIds, deleteDocumentChunks, getCollection, indexInventory } from "../rag/vectorStore.js";
-import { extractFacts } from "./ai.js";
-import { categoryFromFolder, getCategory } from "./categories.js";
-import { listDatasets, registerDataset } from "./dataAgentClient.js";
+import { listDatasets, registerDataset } from "../clients/dataAgentClient.js";
+import { categoryFromFolder, getCategory } from "../documents/categories.js";
+import { SUPPORTED_TYPES, extractText, isTabular } from "../documents/extract.js";
 import {
   SYSTEM_OWNER,
   addDocument,
@@ -25,8 +25,8 @@ import {
   listAll,
   removeDocument,
   updateDocument,
-} from "./documentStore.js";
-import { SUPPORTED_TYPES, extractText, isTabular } from "./extract.js";
+} from "../repositories/documentRepository.js";
+import { extractFacts } from "./documentAiService.js";
 
 const BATCH_SIZE = 50;
 

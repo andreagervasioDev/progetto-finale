@@ -10,20 +10,16 @@
  *   GET    /api/documents/:id/content  contenuto per il lettore (markdown / testo / html / pdf / dataset)
  *   GET    /api/documents/:id/file     file originale (inline; ?download=1 per scaricarlo)
  *   DELETE /api/documents/:id          elimina (non i documenti ufficiali)
- *
- * API dei dataset (file di dati analizzabili dal data agent):
- *   GET    /api/datasets               dataset disponibili (dati partite + file CSV/Excel caricati)
- *   GET    /api/datasets/:id/overview  schema, pulizia, valori mancanti e anteprima righe
  */
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Router } from "express";
 import multer from "multer";
+import { removeDataset } from "../clients/dataAgentClient.js";
+import { CATEGORIES, getCategory, isCategory } from "../documents/categories.js";
+import { SUPPORTED_TYPES, isTabular, readableContent } from "../documents/extract.js";
 import { deleteDocumentChunks } from "../rag/vectorStore.js";
-import { suggestCategory } from "./ai.js";
-import { CATEGORIES, getCategory, isCategory } from "./categories.js";
-import { datasetOverview, listDatasets, removeDataset } from "./dataAgentClient.js";
 import {
   SYSTEM_OWNER,
   addDocument,
@@ -34,12 +30,13 @@ import {
   listVisible,
   removeDocument,
   updateDocument,
-} from "./documentStore.js";
-import { SUPPORTED_TYPES, isTabular, readableContent } from "./extract.js";
-import { DocumentError, plainText, processDocument } from "./indexer.js";
+} from "../repositories/documentRepository.js";
+import { logActivity } from "../services/activityService.js";
+import { upcomingDeadlines } from "../services/deadlineService.js";
+import { suggestCategory } from "../services/documentAiService.js";
+import { DocumentError, plainText, processDocument } from "../services/documentService.js";
 
 const MAX_SIZE_MB = 20;
-const BUILTIN_DATASET = "partite";
 
 const upload = multer({
   dest: path.join(os.tmpdir(), "managementai-uploads"),
@@ -86,7 +83,8 @@ const toPublic = (doc, user) => ({
   facts: doc.facts ?? null,
   official: doc.ownerId === SYSTEM_OWNER,
   canDelete: canDelete(doc, user),
-  canEdit: doc.ownerId !== SYSTEM_OWNER,
+  canEdit: canDelete(doc, user),
+  ownerName: doc.ownerName ?? null,
   chunks: doc.chunks,
   createdAt: doc.createdAt,
 });
@@ -113,16 +111,8 @@ documentsRouter.get("/", async (req, res) => {
 
 /** Scadenze: documenti con una data estratta dall'AI, dalla più vicina. Include le scadute da meno di 60 giorni. */
 documentsRouter.get("/deadlines", async (req, res) => {
-  const today = new Date().setHours(0, 0, 0, 0);
-  const items = (await listVisible(req.user))
-    .filter((d) => d.facts?.expiryDate)
-    .map((d) => {
-      const daysLeft = Math.round((new Date(d.facts.expiryDate).getTime() - today) / 86400000);
-      return { ...toPublic(d, req.user), daysLeft };
-    })
-    .filter((d) => d.daysLeft >= -60)
-    .sort((a, b) => a.daysLeft - b.daysLeft);
-  res.json(items);
+  const items = upcomingDeadlines(await listVisible(req.user));
+  res.json(items.map(({ doc, daysLeft }) => ({ ...toPublic(doc, req.user), daysLeft })));
 });
 
 /** L'AI legge l'inizio del file e propone categoria e titolo (l'utente conferma prima di caricare). */
@@ -177,6 +167,7 @@ documentsRouter.post("/", async (req, res) => {
     });
     doc = await processDocument(doc);
     console.log(`[documenti] caricato "${title}" (${getCategory(category).label})`);
+    logActivity("upload", { docId: doc.id, title, category, fileName: originalName, size: file.size });
     res.status(201).json(toPublic(doc, req.user));
   } catch (err) {
     // qualcosa è andato storto: niente documenti "a metà"
@@ -206,12 +197,16 @@ documentsRouter.patch("/:id", async (req, res) => {
   if (doc.ownerId === SYSTEM_OWNER) {
     return res.status(403).json({ error: "I documenti ufficiali si modificano dalla cartella knowledge_base/." });
   }
+  if (!canDelete(doc, req.user)) {
+    return res.status(403).json({ error: "Puoi modificare solo i documenti che hai caricato." });
+  }
   const patch = {};
   if (typeof req.body?.title === "string" && req.body.title.trim()) patch.title = req.body.title.trim().slice(0, 120);
   if (isCategory(req.body?.category) && !isTabular(doc.ext) && req.body.category !== "dati") patch.category = req.body.category;
   if (!Object.keys(patch).length) return res.status(400).json({ error: "Niente da modificare." });
   try {
     doc = await updateDocument(doc.id, patch);
+    logActivity("edit", { docId: doc.id, title: doc.title, ...patch });
     doc = await processDocument(doc);
     res.json(toPublic(doc, req.user));
   } catch (err) {
@@ -244,48 +239,12 @@ documentsRouter.delete("/:id", async (req, res) => {
   const doc = await loadReadable(req, res);
   if (!doc) return;
   if (!canDelete(doc, req.user)) {
-    return res.status(403).json({ error: "I documenti ufficiali non si possono eliminare dall'app." });
+    const error = doc.ownerId === SYSTEM_OWNER ? "I documenti ufficiali non si possono eliminare dall'app." : "Puoi eliminare solo i documenti che hai caricato.";
+    return res.status(403).json({ error });
   }
   await deleteDocumentChunks(doc.id);
   if (isTabular(doc.ext)) await removeDataset(doc.id).catch(() => {});
   await removeDocument(doc.id);
+  logActivity("delete", { docId: doc.id, title: doc.title, category: doc.category });
   res.json({ deleted: true });
-});
-
-/* ------------------------------------------------------------------ */
-/* Dataset                                                             */
-/* ------------------------------------------------------------------ */
-export const datasetsRouter = Router();
-
-/** Dataset analizzabili: quello delle partite (incluso nel progetto) + i file di dati dell'archivio. */
-export async function availableDatasets(user) {
-  const known = new Map((await listDatasets()).map((d) => [d.id, d]));
-  const docs = (await listVisible(user)).filter((d) => isTabular(d.ext) && known.has(d.id));
-  const builtin = known.get(BUILTIN_DATASET);
-  return [
-    ...(builtin ? [{ ...builtin, docId: null, official: true }] : []),
-    ...docs.map((d) => ({ ...known.get(d.id), title: d.title, docId: d.id, official: d.ownerId === SYSTEM_OWNER })),
-  ];
-}
-
-datasetsRouter.get("/", async (req, res) => {
-  try {
-    res.json(await availableDatasets(req.user));
-  } catch {
-    res.status(502).json({ error: "Data agent non raggiungibile." });
-  }
-});
-
-datasetsRouter.get("/:id/overview", async (req, res) => {
-  const { id } = req.params;
-  if (id !== BUILTIN_DATASET) {
-    const doc = await getDocument(id);
-    if (!doc || !canRead(doc, req.user) || !isTabular(doc.ext)) return res.status(404).json({ error: "Dataset non trovato." });
-  }
-  try {
-    const rows = Math.min(Number(req.query.rows) || 50, 200);
-    res.json(await datasetOverview(id, rows));
-  } catch (err) {
-    res.status(err.status === 404 ? 404 : 502).json({ error: err.status === 404 ? "Dataset non trovato." : "Data agent non raggiungibile." });
-  }
 });

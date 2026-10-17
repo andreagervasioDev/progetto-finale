@@ -1,27 +1,43 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { getMe } from "./api.js";
+import { UNAUTHORIZED_EVENT, getMe, logout } from "./api.js";
 import AiFab from "./components/AiFab.jsx";
 import ChatDrawer from "./components/ChatDrawer.jsx";
+import FileDropUpload from "./components/FileDropUpload.jsx";
 import Icon from "./components/Icon.jsx";
 import NavBar from "./components/NavBar.jsx";
 import { ChatProvider, useChat } from "./context/ChatContext.jsx";
+import AdminPage from "./pages/AdminPage.jsx";
 import AssistantPage from "./pages/AssistantPage.jsx";
 import DataPage from "./pages/DataPage.jsx";
 import DocumentViewerPage from "./pages/DocumentViewerPage.jsx";
 import DocumentsPage from "./pages/DocumentsPage.jsx";
 import HomePage from "./pages/HomePage.jsx";
+import LoginPage from "./pages/LoginPage.jsx";
 
-/** Radice dell'app: carica il profilo e mostra l'area di lavoro (nessun login). */
+/** Radice dell'app: verifica la sessione, mostra il login oppure l'area di lavoro. */
 export default function App() {
-  const [user, setUser] = useState(undefined); // undefined = caricamento, null = backend non raggiungibile
+  // undefined = caricamento, null = backend non raggiungibile, false = non collegato, oggetto = utente
+  const [user, setUser] = useState(undefined);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     getMe()
-      .then(setUser)
+      .then((me) => setUser(me ?? false))
       .catch(() => setUser(null));
   }, [attempt]);
+
+  // sessione scaduta durante l'uso: si torna al login
+  useEffect(() => {
+    const onUnauthorized = () => setUser((u) => (u ? false : u));
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, []);
+
+  const signOut = async () => {
+    await logout();
+    setUser(false);
+  };
 
   // il pallone iniziale è in index.html (compare prima del codice React): lo togliamo quando l'app è pronta
   const ready = user !== undefined;
@@ -35,6 +51,7 @@ export default function App() {
   }, [ready]);
 
   if (!ready) return null;
+  if (user === false) return <LoginPage onLogin={setUser} />;
   if (!user)
     return (
       <div className="splash">
@@ -56,15 +73,15 @@ export default function App() {
     );
   return (
     <ChatProvider key={user.id} user={user}>
-      <Shell />
+      <Shell onLogout={signOut} />
     </ChatProvider>
   );
 }
 
-const TITLES = { "/": "Home", "/documenti": "Documenti", "/assistente": "Assistente AI", "/dati": "Dati" };
+const TITLES = { "/": "Home", "/documenti": "Documenti", "/assistente": "Assistente AI", "/dati": "Dati", "/admin": "Amministrazione" };
 
 /** Struttura: menu a sinistra, pagina al centro, assistente nel pannello a destra. */
-function Shell() {
+function Shell({ onLogout }) {
   const { user, drawerOpen } = useChat();
   const location = useLocation();
   const [navOpen, setNavOpen] = useState(false);
@@ -73,7 +90,7 @@ function Shell() {
 
   return (
     <div className={`shell ${drawerOpen && !onAssistant ? "with-drawer" : ""}`}>
-      <NavBar user={user} open={navOpen} onClose={() => setNavOpen(false)} />
+      <NavBar open={navOpen} onClose={() => setNavOpen(false)} user={user} onLogout={onLogout} />
 
       <main className="content">
         <header className="mobile-bar">
@@ -89,6 +106,7 @@ function Shell() {
           <Route path="/documenti/:id" element={<DocumentViewerPage />} />
           <Route path="/assistente" element={<AssistantPage />} />
           <Route path="/dati" element={<DataPage />} />
+          <Route path="/admin" element={user.isAdmin ? <AdminPage /> : <Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
@@ -96,6 +114,8 @@ function Shell() {
       {/* sulla pagina Assistente la chat è già a tutta pagina: niente pannello né pulsante flottante */}
       {!onAssistant && <ChatDrawer />}
       {!onAssistant && <AiFab />}
+      {/* trascinando un file in qualsiasi pagina si apre il caricamento */}
+      <FileDropUpload />
     </div>
   );
 }

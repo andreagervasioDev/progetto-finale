@@ -3,9 +3,10 @@
  * Ogni tool ha: la definizione JSON Schema vista dal modello e un handler che la esegue.
  * Gli handler ricevono il contesto della richiesta (utente, documento o dataset aperto, dataset disponibili).
  */
-import { config } from "../config.js";
+import { analyzeData } from "../clients/dataAgentClient.js";
 import { CATEGORIES, TEXT_CATEGORY_IDS } from "../documents/categories.js";
 import { searchKnowledgeBase } from "../rag/vectorStore.js";
+import { recordUsage } from "../services/usageService.js";
 
 const categoryList = CATEGORIES.filter((c) => TEXT_CATEGORY_IDS.includes(c.id))
   .map((c) => `'${c.id}' = ${c.label}`)
@@ -118,17 +119,9 @@ async function runSearchKnowledgeBase({ query, scope, category }, ctx) {
 
 async function runAnalyzeData({ question, context, dataset_id }, ctx) {
   const datasetId = dataset_id || ctx.dataset?.id || "partite";
-  const res = await fetch(`${config.dataAgentUrl}/analyze`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, context, dataset_id: datasetId }),
-    signal: AbortSignal.timeout(config.dataAgentTimeoutMs),
-  });
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`Data agent ha risposto ${res.status}: ${detail.slice(0, 300)}`);
-  }
-  const data = await res.json();
+  const data = await analyzeData({ question, context, datasetId });
+  // token consumati dal pandas agent Python, attribuiti all'utente che ha fatto la domanda
+  for (const u of data.usage ?? []) recordUsage({ kind: "data_agent", model: u.model, usage: u });
   const charts = data.charts.map((c) => ({ ...c, url: `/api/charts/${c.filename}` }));
   return {
     content:

@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { config } from "./config.js";
+import { config } from "../config.js";
 
 const ROOT = path.join(config.storageDir, "conversations");
 const ID_RE = /^[a-zA-Z0-9-]{8,64}$/;

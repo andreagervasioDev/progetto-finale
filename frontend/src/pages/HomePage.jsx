@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { getDeadlines, listDatasets, listDocuments } from "../api.js";
+import { getDeadlines, listDatasets, listDocuments, logSearch } from "../api.js";
 import Icon from "../components/Icon.jsx";
 import TypeBadge from "../components/TypeBadge.jsx";
 import UploadDialog from "../components/UploadDialog.jsx";
@@ -84,6 +84,7 @@ export default function HomePage() {
   const runSearch = (e) => {
     e.preventDefault();
     const q = search.trim();
+    if (q.length >= 2) logSearch(q, "home");
     navigate(q ? `/documenti?q=${encodeURIComponent(q)}` : "/documenti");
   };
 

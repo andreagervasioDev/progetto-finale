@@ -31,6 +31,14 @@ export const config = {
   dataAgentTimeoutMs: Number(process.env.DATA_AGENT_TIMEOUT_MS || 180000),
   maxAgentSteps: Number(process.env.MAX_AGENT_STEPS || 6),
   maxHistoryMessages: Number(process.env.MAX_HISTORY_MESSAGES || 20),
+  auth: {
+    // chiave per firmare le sessioni: se manca viene generata e salvata in storage/.auth_secret
+    secret: process.env.AUTH_SECRET || null,
+    sessionDays: Number(process.env.SESSION_DAYS || 7),
+    // password degli utenti creati al primo avvio (cambiale nel .env prima di condividere l'app)
+    defaultAdminPassword: process.env.DEFAULT_ADMIN_PASSWORD || "admin",
+    defaultTestPassword: process.env.DEFAULT_TEST_PASSWORD || "test",
+  },
 };
 
 export function assertOpenAIKey() {

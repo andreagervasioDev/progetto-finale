@@ -8,7 +8,7 @@
  */
 import { pathToFileURL } from "node:url";
 import { assertOpenAIKey } from "../config.js";
-import { syncKnowledgeBase } from "../documents/indexer.js";
+import { syncKnowledgeBase } from "../services/documentService.js";
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {

@@ -1,6 +1,7 @@
 import { ChromaClient } from "chromadb";
 import { config } from "../config.js";
-import { getOpenAI } from "../openaiClient.js";
+import { getOpenAI } from "../clients/openaiClient.js";
+import { recordUsage } from "../services/usageService.js";
 
 /**
  * Funzione di embedding custom per Chroma basata su OpenAI.
@@ -10,6 +11,7 @@ const openAIEmbeddingFunction = {
   name: "openai-custom",
   async generate(texts) {
     const res = await getOpenAI().embeddings.create({ model: config.embeddingModel, input: texts });
+    recordUsage({ kind: "embedding", model: res.model ?? config.embeddingModel, usage: res.usage });
     return res.data.map((d) => d.embedding);
   },
 };

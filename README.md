@@ -18,18 +18,22 @@ L'agente sceglie da solo quale strumento usare (paradigma **ReAct**, Reason + Ac
 ## Indice
 
 1. [Scenario aziendale](#1-scenario-aziendale)
-2. [Architettura](#2-architettura)
-3. [Struttura del progetto](#3-struttura-del-progetto)
-4. [Prerequisiti](#4-prerequisiti)
-5. [Installazione](#5-installazione)
-6. [Configurazione (.env)](#6-configurazione-env)
-7. [Avvio](#7-avvio)
-8. [Domande di esempio](#8-domande-di-esempio)
-9. [Dati e knowledge base](#9-dati-e-knowledge-base)
-10. [Dettagli tecnici](#10-dettagli-tecnici)
-11. [API](#11-api)
-12. [Sicurezza](#12-sicurezza)
-13. [Risoluzione dei problemi](#13-risoluzione-dei-problemi)
+2. [Requisiti della traccia](#2-requisiti-della-traccia)
+3. [Architettura](#3-architettura)
+4. [Struttura del progetto](#4-struttura-del-progetto)
+5. [Prerequisiti](#5-prerequisiti)
+6. [Installazione](#6-installazione)
+7. [Configurazione (.env)](#7-configurazione-env)
+8. [Avvio](#8-avvio)
+9. [Test](#9-test)
+10. [Domande di esempio](#10-domande-di-esempio)
+11. [Dati e knowledge base](#11-dati-e-knowledge-base)
+12. [Dettagli tecnici](#12-dettagli-tecnici)
+13. [Scelte di design](#13-scelte-di-design)
+14. [API](#14-api)
+15. [Sicurezza](#15-sicurezza)
+16. [Limiti noti](#16-limiti-noti)
+17. [Risoluzione dei problemi](#17-risoluzione-dei-problemi)
 
 ---
 
@@ -46,7 +50,33 @@ Le due fonti sono **complementari**. La knowledge base definisce le soglie (ACWR
 
 ---
 
-## 2. Architettura
+## 2. Requisiti della traccia
+
+Corrispondenza tra i requisiti del progetto e la loro implementazione.
+
+| Requisito | Dove si trova |
+|---|---|
+| CSV di almeno 1000 righe con metriche, categorie, date e numeri | `data_agent/data/player_performance.csv`: 1.578 righe × 40 colonne ([sezione 11](#11-dati-e-knowledge-base)) |
+| Anomalie: valori mancanti, duplicati, formati incoerenti, fuori range | 8 tipi di anomalia introdotti da `generate_dataset.py`, verificati da `data_agent/tests/test_cleaning.py` |
+| Documento di testo/PDF come knowledge base | 4 documenti in `backend/knowledge_base/` (regolamento, protocollo medico, linee guida, FAQ); in più PDF, Word, TXT e MD caricabili dall'interfaccia |
+| Frontend React con chat come punto di interazione | `frontend/`: pagina Assistente e pannello laterale presente in ogni pagina |
+| Memoria conversazionale e stato asincrono dei messaggi | conversazioni salvate su disco e riprendibili (`repositories/conversationRepository.js`, `context/ChatContext.jsx`) |
+| Stato di caricamento ("sta ragionando" / "sta eseguendo codice") | eventi SSE dal backend mostrati da `TypingIndicator.jsx` |
+| Rendering di testo e grafici generati dal backend | `ChatMessage.jsx` (Markdown + tabelle), `ChartGallery.jsx` (PNG dal data agent) |
+| Endpoint `POST /api/chat`, session state e function calling | `backend/src/routes/chat.routes.js` → `services/chatService.js` → `services/agentService.js` |
+| L'LLM decide in autonomia tra RAG e data agent (ReAct) | SDK OpenAI nativo, tool `search_knowledge_base` e `analyze_data` (`tools/index.js`) |
+| RAG con istanza locale di ChromaDB: avvio, indicizzazione, retrieval | `npm run chroma`, indicizzazione automatica all'avvio (`services/documentService.js`, `rag/`) |
+| Integrazione Node ↔ Python tramite microservizio locale | FastAPI su `:8001`, chiamato da `clients/dataAgentClient.js` |
+| Agente pandas: domanda → codice Python → pulizia → grafico su disco → sintesi | `data_agent/agent.py`, `executor.py`, `cleaning.py`; grafici in `data_agent/charts/` |
+| Interprete deterministico di codice | `executor.py`: il codice viene eseguito davvero, in una sandbox a più barriere (AST, builtins ridotti, I/O neutralizzato, timeout), verificata da `test_executor.py` |
+| API key solo in `.env`, escluso dal version control | `.env` nella root, `.env.example` con segnaposto, `.gitignore` |
+| README con installazione dei 3 ambienti e sequenza di avvio | sezioni [6](#6-installazione) e [8](#8-avvio) |
+
+Oltre ai requisiti, la piattaforma aggiunge l'accesso con password e una dashboard di amministrazione (spesa in token, utenti, storico delle attività), un archivio documenti per categorie con caricamento da web, l'estrazione di scadenze e importi e l'analisi di file Excel/CSV caricati dall'utente (vedi [Scelte di design](#13-scelte-di-design)).
+
+---
+
+## 3. Architettura
 
 ```
 ┌──────────────────────────┐  POST /api/chat/stream (SSE)  ┌─────────────────────────────────────┐
@@ -86,7 +116,7 @@ Il data agent Python è a sua volta un agente ReAct: scrive codice pandas, lo es
 
 ---
 
-## 3. Struttura del progetto
+## 4. Struttura del progetto
 
 ```
 Progetto finale/
@@ -107,6 +137,8 @@ Progetto finale/
 │       │   ├── HomePage.jsx           # benvenuto, numeri rapidi, recenti, domande di esempio
 │       │   ├── DocumentsPage.jsx      # elenco club/personali, ricerca, drag & drop
 │       │   ├── DocumentViewerPage.jsx # lettore PDF/Word/Markdown/TXT + "Chiedi all'AI"
+│       │   ├── LoginPage.jsx          # accesso con nome utente e password
+│       │   ├── AdminPage.jsx          # amministrazione: spesa AI, utenti, attività, conversazioni
 │       │   ├── AssistantPage.jsx      # chat a tutta pagina con cronologia
 │       │   └── DataPage.jsx           # scelta del dataset + panoramica (KPI, pulizia, anteprima)
 │       ├── components/
@@ -114,7 +146,8 @@ Progetto finale/
 │       │   ├── ChatView.jsx        # conversazione (usata a tutta pagina e nel pannello)
 │       │   ├── ChatDrawer.jsx      # assistente nel pannello laterale destro
 │       │   ├── AiFab.jsx           # pulsante flottante "Chiedi all'AI"
-│       │   ├── UploadDialog.jsx    # caricamento: categoria proposta dall'AI, titolo, avanzamento
+│       │   ├── UploadDialog.jsx    # caricamento: trascinamento o scelta del file, categoria proposta dall'AI
+│       │   ├── FileDropUpload.jsx  # trascinamento di file da Finder / Esplora risorse in qualsiasi pagina
 │       │   ├── DatasetView.jsx     # panoramica di un dataset (pagina Dati e lettore Excel/CSV)
 │       │   ├── ChatMessage.jsx     # rendering markdown (tabelle GFM) + grafici
 │       │   ├── ChartGallery.jsx    # immagini dei grafici con zoom e download
@@ -129,39 +162,63 @@ Progetto finale/
 │   ├── knowledge_base/          # documenti ufficiali importati all'avvio; sottocartelle = categorie
 │   │   ├── *.md                 # regolamenti e procedure (radice)
 │   │   └── contratti/ sponsor/ medico/ mercato/ prestazioni/ dati/
-│   │   ├── 01_regolamento_interno_prima_squadra.md
-│   │   ├── 02_protocollo_medico_infortuni_rtp.md
-│   │   ├── 03_linee_guida_carico_e_kpi.md
-│   │   └── 04_faq_staff_e_procedure.md
-│   └── src/
-│       ├── server.js            # endpoint REST/SSE, health check, proxy dei grafici
+│   ├── tests/                   # test Node (node:test): chunking, categorie, scadenze, prompt, API HTTP
+│   └── src/                     # architettura a livelli
+│       ├── server.js            # avvio: porta + sincronizzazione della knowledge base
+│       ├── app.js               # app Express: middleware e montaggio delle rotte (importabile dai test)
 │       ├── config.js            # lettura del .env
-│       ├── openaiClient.js
-│       ├── conversationStore.js # conversazioni persistenti per utente (storage/conversations/<userId>/)
-│       ├── auth/userStore.js    # profilo unico della piattaforma (storage/users.json), niente login
-│       ├── agent/orchestrator.js# ciclo ReAct con function calling
+│       ├── routes/              # endpoint HTTP: validano l'input e chiamano i servizi
+│       │   ├── chat.routes.js         # POST /api/chat e /api/chat/stream (SSE)
+│       │   ├── conversations.routes.js
+│       │   ├── documents.routes.js    # upload, proposta categoria, scadenze, modifica, lettore
+│       │   ├── datasets.routes.js
+│       │   ├── charts.routes.js       # proxy dei grafici del data agent
+│       │   ├── auth.routes.js         # login e logout
+│       │   ├── admin.routes.js        # dashboard admin: KPI di spesa, utenti, attività, conversazioni
+│       │   ├── activity.routes.js     # registrazione delle ricerche
+│       │   ├── health.routes.js
+│       │   └── profile.routes.js
+│       ├── services/            # logica applicativa
+│       │   ├── chatService.js         # turno di chat: contesto, cronologia, agente, salvataggio
+│       │   ├── agentService.js        # ciclo ReAct con function calling
+│       │   ├── documentService.js     # elaborazione dei documenti + sincronizzazione all'avvio
+│       │   ├── documentAiService.js   # AI sui documenti: proposta categoria/titolo, dati chiave
+│       │   ├── authService.js         # login, sessioni firmate (cookie HttpOnly), blocco dei tentativi
+│       │   ├── passwordService.js     # hash delle password con scrypt
+│       │   ├── usageService.js        # token consumati, prezzi e spesa stimata
+│       │   ├── activityService.js     # storico di accessi, domande, ricerche e caricamenti
+│       │   ├── requestContext.js      # utente della richiesta in corso (per attribuire token e attività)
+│       │   ├── datasetService.js      # dataset analizzabili (partite + file caricati)
+│       │   └── deadlineService.js     # calcolo delle scadenze
+│       ├── prompts/systemPrompt.js    # system prompt dell'orchestratore
 │       ├── tools/index.js       # i 2 tool: ricerca (con categoria/documento aperto) e analisi (con dataset)
-│       ├── documents/
-│       │   ├── routes.js        # API documenti e dataset: upload, proposta categoria, scadenze, modifica
-│       │   ├── categories.js    # categorie dell'archivio (con estrazione dati chiave e cartella)
-│       │   ├── ai.js            # AI sui documenti: proposta categoria/titolo, estrazione dati chiave
-│       │   ├── dataAgentClient.js # registrazione dei file Excel/CSV nel data agent
-│       │   ├── documentStore.js # metadati (storage/documents.json) e file (storage/files/)
-│       │   ├── extract.js       # estrazione testo: PDF per pagina (pdf-parse), Word (mammoth), MD/TXT
-│       │   └── indexer.js       # elaborazione per documento + sincronizzazione all'avvio
-│       └── rag/
-│           ├── chunker.js       # chunking per sezioni markdown / per pagina, con overlap
-│           ├── vectorStore.js   # client Chroma + embedding OpenAI + retrieval filtrato per permessi
-│           └── ingest.js        # sincronizzazione/re-indicizzazione da riga di comando
+│       ├── rag/
+│       │   ├── chunker.js       # chunking per sezioni markdown / per pagina, con overlap
+│       │   ├── vectorStore.js   # client Chroma + embedding OpenAI + retrieval filtrato
+│       │   └── ingest.js        # sincronizzazione/re-indicizzazione da riga di comando
+│       ├── repositories/        # dati salvati su disco (backend/storage/)
+│       │   ├── conversationRepository.js # conversazioni per utente, scrittura atomica
+│       │   ├── documentRepository.js     # metadati (documents.json) e file (files/)
+│       │   ├── userRepository.js         # utenti con password (hash scrypt) e ruolo admin (users.json)
+│       │   └── eventLogRepository.js     # registri attività e consumo token (activity.jsonl, usage.jsonl)
+│       ├── clients/             # servizi esterni
+│       │   ├── openaiClient.js
+│       │   └── dataAgentClient.js  # tutte le chiamate HTTP verso il data agent Python
+│       ├── middleware/auth.js   # sessione obbligatoria sulle API, area admin riservata
+│       └── documents/
+│           ├── categories.js    # categorie dell'archivio (con estrazione dati chiave e cartella)
+│           └── extract.js       # estrazione testo: PDF per pagina (pdf-parse), Word (mammoth), MD/TXT
 │
 └── data_agent/                  # Python 3.10+ / FastAPI
     ├── app.py                   # microservizio: /analyze, /datasets, /charts, /health
     ├── datasets.py              # archivio dataset: lettura CSV/Excel, pulizia generica, schema per l'LLM
     ├── agent.py                 # pandas agent ReAct (OpenAI tool calling)
-    ├── executor.py              # interprete Python con controlli di sicurezza (AST)
+    ├── executor.py              # sandbox: AST + builtins ridotti + I/O neutralizzato + timeout
     ├── cleaning.py              # pipeline di data cleaning dedicata al dataset partite
     ├── datasets/                # file Excel/CSV caricati dagli utenti (escluso da git)
+    ├── tests/                   # test pytest: pulizia, interprete, dataset, API
     ├── requirements.txt
+    ├── requirements-dev.txt     # requirements.txt + pytest e httpx per i test
     ├── charts/                  # PNG generati a runtime
     └── data/
         ├── generate_dataset.py  # generatore riproducibile del CSV (seed fisso)
@@ -170,7 +227,7 @@ Progetto finale/
 
 ---
 
-## 4. Prerequisiti
+## 5. Prerequisiti
 
 | Software | Versione | Verifica |
 |---|---|---|
@@ -183,7 +240,7 @@ ChromaDB **non** richiede installazioni separate: il server locale è incluso ne
 
 ---
 
-## 5. Installazione
+## 6. Installazione
 
 ### Opzione A: tutto con un comando (macOS / Linux)
 
@@ -193,7 +250,7 @@ Dalla root del progetto:
 npm run setup
 ```
 
-Il comando installa le dipendenze della root, del backend e del frontend, crea il virtualenv Python in `data_agent/.venv` e ci installa i requisiti.
+Il comando installa le dipendenze della root, del backend e del frontend, crea il virtualenv Python in `data_agent/.venv` e ci installa i requisiti (comprese le dipendenze dei test).
 
 ### Opzione B: un ambiente alla volta
 
@@ -213,6 +270,7 @@ cd data_agent
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+pip install -r requirements-dev.txt   # facoltativo: solo per eseguire i test
 deactivate
 cd ..
 
@@ -225,7 +283,7 @@ npm install
 
 ---
 
-## 6. Configurazione (.env)
+## 7. Configurazione (.env)
 
 C'è **un solo file `.env` nella root**, letto sia dal backend Node sia dal data agent Python.
 
@@ -254,12 +312,15 @@ OPENAI_API_KEY=sk-...la-tua-chiave...
 | `MAX_AGENT_STEPS` | `6` | Passi ReAct massimi dell'orchestratore |
 | `DATA_AGENT_MAX_STEPS` | `8` | Passi ReAct massimi del pandas agent |
 | `MAX_HISTORY_MESSAGES` | `20` | Messaggi di cronologia inviati all'LLM |
+| `DEFAULT_ADMIN_PASSWORD` / `DEFAULT_TEST_PASSWORD` | `admin` / `test` | Password degli utenti creati al primo avvio |
+| `AUTH_SECRET` | generata | Chiave che firma le sessioni; se manca viene creata in `backend/storage/.auth_secret` |
+| `SESSION_DAYS` | `7` | Durata della sessione dopo il login |
 
 Il file `.env` è escluso da git tramite `.gitignore`. **Non va mai committato.**
 
 ---
 
-## 7. Avvio
+## 8. Avvio
 
 L'architettura è composta da **4 processi**. L'ordine consigliato è quello indicato qui sotto.
 
@@ -311,7 +372,14 @@ Apri **http://localhost:5173**.
 
 ### Primo accesso
 
-Non c'è login: all'apertura si entra direttamente nella Home. La piattaforma usa un **profilo unico** ("Staff del club", creato al primo avvio in `backend/storage/users.json`, dove si possono modificare nome e ruolo), con un'unica cronologia e un unico archivio documenti.
+All'apertura compare la pagina di **accesso**. Al primo avvio vengono creati due utenti:
+
+| Utente | Password | Cosa vede |
+|---|---|---|
+| `test` | `test` | La piattaforma: Home, Documenti, Assistente AI, Dati |
+| `admin` | `admin` | Tutto, più la voce **Amministrazione** |
+
+Le password sono salvate come hash (scrypt) in `backend/storage/users.json`; quelle iniziali si cambiano nel `.env` (`DEFAULT_ADMIN_PASSWORD`, `DEFAULT_TEST_PASSWORD`) **prima** del primo avvio. Ogni utente ha la propria cronologia delle chat; l'archivio documenti è condiviso dal club. Se esisteva già un profilo da una versione precedente, diventa l'utente `admin` e mantiene le sue conversazioni. Per uscire c'è il pulsante in fondo al menu.
 
 ### Come si usa
 
@@ -322,6 +390,9 @@ Non c'è login: all'apertura si entra direttamente nella Home. La piattaforma us
 | **Lettore** | Mostra la **scheda dei dati chiave** estratti dall'AI e permette di cambiare categoria. Premi **Chiedi all'AI**: le domande sono limitate a quel file (o, per un Excel/CSV, l'analisi usa quei dati). Puoi passare alle domande generali con un clic |
 | **Assistente AI** | La chat a tutta pagina con la cronologia. Dal pannello laterale il pulsante ⤢ porta qui la stessa conversazione |
 | **Dati** | Scegli il dataset (partite o file caricati) e vedi numeri, passi di pulizia automatica, valori mancanti, anteprima delle righe pulite o grezze e schema delle colonne |
+| **Amministrazione** (solo admin) | **Panoramica e costi**: spesa AI totale, ultimi 30 giorni, oggi, costo medio per domanda, grafico giornaliero, spesa per tipo di utilizzo, per utente e per modello. **Utenti**: elenco con conversazioni, domande, ricerche, caricamenti, token e spesa. **Attività**: storico di accessi, domande, ricerche, caricamenti e modifiche, filtrabile per utente e tipo. **Conversazioni**: le chat di tutti gli utenti, in sola lettura |
+
+**Caricare un file**: trascinalo da Finder / Esplora risorse in qualsiasi pagina dell'app, oppure sul riquadro della finestra "Carica documento", oppure clicca il riquadro per sceglierlo.
 
 ### Verifica
 
@@ -345,7 +416,38 @@ Non c'è login: all'apertura si entra direttamente nella Home. La piattaforma us
 
 ---
 
-## 8. Domande di esempio
+## 9. Test
+
+Il progetto ha test automatici per backend e data agent. **Non chiamano OpenAI** e non toccano i dati reali: profilo, documenti e dataset di prova finiscono in cartelle temporanee.
+
+```bash
+npm test                 # dalla root: tutti i test (macOS / Linux)
+```
+
+Oppure separatamente:
+
+```bash
+cd backend && npm test                                           # Node (node:test, nessuna dipendenza)
+cd data_agent && .venv/bin/python -m pytest -q tests             # Python (pytest)
+```
+
+| Test | Cosa verifica |
+|---|---|
+| `backend/tests/chunker.test.js` | divisione per sezioni Markdown e per pagina, dimensione massima e sovrapposizione dei chunk |
+| `backend/tests/categories.test.js` | categorie dell'archivio, categoria dalla sottocartella, formati supportati |
+| `backend/tests/documentAi.test.js` | validazione delle risposte dell'AI (categoria proposta, date ISO, importi) |
+| `backend/tests/deadlines.test.js` | calcolo dei giorni alla scadenza, ordinamento, scadenze passate |
+| `backend/tests/agent.test.js` | definizione dei tool per il function calling, contenuto del system prompt, fonti |
+| `backend/tests/http.test.js` | API reali su una porta casuale: login e sessione (401, cookie manomesso, blocco dopo 5 tentativi), permessi admin (403), storico delle ricerche, validazione della chat, upload rifiutati, path traversal |
+| `backend/tests/usage.test.js` | hash delle password, firma e scadenza delle sessioni, prezzi dei modelli, calcolo della spesa e riepiloghi della dashboard |
+| `data_agent/tests/test_cleaning.py` | il CSV ha ≥ 1000 righe e anomalie; dopo la pulizia 1.539 righe, niente duplicati, date, categorie e range corretti |
+| `data_agent/tests/test_executor.py` | sandbox: esecuzione del codice pandas, blocco di lettura file (`.env`), rete, scrittura su disco, import, `eval`, attributi dunder, alias delle funzioni e timeout |
+| `data_agent/tests/test_datasets.py` | pulizia dei CSV/Excel caricati: formati italiani (`€ 1.234,50`, `1.200.000`, `15%`, gg/mm/aaaa), duplicati, righe vuote |
+| `data_agent/tests/test_api.py` | API FastAPI: health, panoramica, caricamento e rimozione di un dataset, validazione di `/analyze` |
+
+---
+
+## 10. Domande di esempio
 
 | Tipo | Domanda | Strumenti attesi |
 |---|---|---|
@@ -367,7 +469,7 @@ Non c'è login: all'apertura si entra direttamente nella Home. La piattaforma us
 
 ---
 
-## 9. Dati e knowledge base
+## 11. Dati e knowledge base
 
 ### Dataset: `data_agent/data/player_performance.csv`
 
@@ -415,7 +517,7 @@ La knowledge base è composta dai **documenti ufficiali del club** (i file di `b
 
 ---
 
-## 10. Dettagli tecnici
+## 12. Dettagli tecnici
 
 ### RAG custom (backend)
 - **Estrazione del testo**: PDF pagina per pagina con `pdf-parse`, così le fonti citano la pagina; Word con `mammoth`; Markdown e TXT così come sono. I PDF scansionati, senza testo, vengono rifiutati con un messaggio chiaro.
@@ -427,7 +529,7 @@ La knowledge base è composta dai **documenti ufficiali del club** (i file di `b
 - **Retrieval**: top-4 chunk (5 dentro un singolo documento) con similarità, documento e sezione o pagina. Sono passati all'LLM con le etichette di fonte e mostrati nel frontend come link che aprono il documento alla pagina giusta.
 
 ### Orchestratore (backend)
-- Function calling nativo dell'**SDK OpenAI**, senza framework, così il ciclo ReAct è esplicito e leggibile in `agent/orchestrator.js`.
+- Function calling nativo dell'**SDK OpenAI**, senza framework, così il ciclo ReAct è esplicito e leggibile in `services/agentService.js` (system prompt in `prompts/systemPrompt.js`).
 - Supporta **chiamate parallele** e **catene di strumenti** (KB → data agent con `context`).
 - **Contesto per richiesta**: il system prompt include l'utente, l'archivio raggruppato per categoria, i **dati chiave** (scadenze e importi), i **dataset disponibili** con le loro colonne e l'eventuale documento o dataset aperto. Con un documento aperto il tool di ricerca espone il parametro `scope` (`documento_aperto` / `tutti`); con un dataset aperto l'analisi usa quel `dataset_id`.
 - **Memoria e cronologia**: ogni conversazione è salvata in `backend/storage/conversations/<userId>/<id>.json` con testo, grafici, fonti e passi dell'agente, scritta in modo atomico. Sopravvive al riavvio dei servizi. Dalla sidebar "Cronologia" (raggruppata per Oggi, Ieri, Ultimi 7 giorni) si può riaprire una chat passata e continuarla: all'LLM vengono ripassati gli ultimi `MAX_HISTORY_MESSAGES` messaggi. Il browser ricorda solo quale conversazione era aperta.
@@ -449,7 +551,19 @@ La knowledge base è composta dai **documenti ufficiali del club** (i file di `b
 
 ---
 
-## 11. API
+## 13. Scelte di design
+
+- **Microservizio FastAPI invece di `child_process`.** La traccia ammette entrambe le strade. Un servizio sempre attivo carica e pulisce il CSV una sola volta all'avvio (invece che a ogni domanda), espone la documentazione su `/docs`, serve i grafici e si può testare da solo.
+- **SDK OpenAI nativo invece di LangChain.** Il ciclo ReAct (ragiona → chiama uno strumento → osserva il risultato) è scritto in chiaro in `services/agentService.js`, così ogni passo è leggibile e tracciato nella risposta. Per lo stesso motivo il pandas agent è custom (vedi [Dettagli tecnici](#12-dettagli-tecnici)).
+- **Backend a livelli.** `routes/` riceve le richieste e valida l'input, `services/` contiene la logica, `repositories/` legge e scrive su disco, `clients/` parla con OpenAI e con il data agent. `app.js` costruisce l'app senza avviarla, così i test la usano direttamente.
+- **File JSON invece di un database.** Conversazioni e metadati dei documenti sono pochi e locali: file JSON con scrittura atomica bastano e non richiedono installazioni. ChromaDB resta il database dei contenuti dei documenti.
+- **Un solo `.env` nella root**, letto da backend e data agent: una sola configurazione da preparare.
+- **Pulizia deterministica prima dell'LLM.** Il dataset viene pulito da codice tracciato (`cleaning.py`), non dal modello: il risultato è ripetibile (1.578 → 1.539 righe) e ogni correzione compare nel report. L'agente può aggiungere pulizie specifiche per la domanda.
+- **Funzioni oltre la traccia.** Archivio per categorie con caricamento da web, estrazione di scadenze e importi, analisi di Excel/CSV caricati. Nascono dallo scenario (un club gestisce contratti, certificati, sponsorizzazioni) e usano gli stessi due strumenti dell'agente: la chat resta il punto da cui si interroga tutto.
+
+---
+
+## 14. API
 
 ### Backend (`http://localhost:3002`)
 
@@ -475,7 +589,17 @@ La knowledge base è composta dai **documenti ufficiali del club** (i file di `b
 | `GET` | `/api/datasets` | Dataset analizzabili (partite + file Excel/CSV dell'archivio) |
 | `GET` | `/api/datasets/:id/overview` | Schema, pulizia, valori mancanti e anteprima righe di un dataset |
 | `GET` | `/api/health` | Stato di backend, Chroma, data agent e chiave OpenAI (pubblico) |
-| `GET` | `/api/me` | Profilo della piattaforma (nome e ruolo) |
+| `POST` | `/api/auth/login` | `{ username, password }` → cookie di sessione + profilo (pubblico) |
+| `POST` | `/api/auth/logout` | Chiude la sessione |
+| `GET` | `/api/me` | Utente collegato (401 senza sessione) |
+| `POST` | `/api/activity/search` | `{ query, source }` → registra una ricerca nello storico |
+| `GET` | `/api/admin/overview` | **Admin**: KPI di spesa e token (totale, 30 giorni, giornaliero, per tipo, modello e utente) |
+| `GET` | `/api/admin/users` | **Admin**: utenti con conversazioni, domande, ricerche, caricamenti, token e spesa |
+| `GET` | `/api/admin/activity` | **Admin**: storico attività (`?userId`, `?type`, `?limit`) |
+| `GET` | `/api/admin/conversations` | **Admin**: conversazioni di tutti gli utenti (`?userId`) |
+| `GET` | `/api/admin/conversations/:userId/:id` | **Admin**: una conversazione completa |
+
+Tutte le API tranne `/api/health` e `/api/auth/*` richiedono il cookie di sessione (altrimenti `401`); quelle `/api/admin/*` rispondono `403` agli utenti non amministratori.
 
 Esempio:
 ```bash
@@ -498,20 +622,41 @@ curl -X POST http://localhost:3002/api/chat \
 
 ---
 
-## 12. Sicurezza
+## 15. Sicurezza
 
 - **Nessuna chiave nel codice**: tutte le credenziali sono lette da `.env` (`dotenv` / `python-dotenv`), che è escluso dal version control. Nel repository c'è solo `.env.example` con dei segnaposto.
-- **Nessun login**: la piattaforma è pensata per l'uso locale da parte dello staff, con un profilo unico. Per esporla in rete andrebbe aggiunta un'autenticazione davanti al backend (es. SSO aziendale o reverse proxy con login).
-- `backend/storage/` (profilo, documenti e chat) è escluso dal version control.
-- **Esecuzione di codice generato dall'LLM**: prima di eseguirlo, `executor.py` analizza il codice con l'AST e blocca gli import non consentiti (sono permessi solo pandas, numpy, matplotlib, seaborn, math, statistics, datetime, scipy, collections e itertools), le funzioni pericolose (`open`, `exec`, `eval`, `__import__`, `getattr`...), gli attributi dunder e i metodi di scrittura o lettura su file (`to_csv`, `read_csv`...). L'output è troncato.
-  *Limite noto*: non è una sandbox a livello di sistema operativo. In produzione il data agent andrebbe eseguito in un container isolato, senza rete e con limiti di CPU e memoria.
-- **Upload**: solo estensioni consentite (PDF, DOCX, TXT, MD), massimo 20 MB, file salvati con nome casuale (id) fuori dalla cartella pubblica. Se l'indicizzazione fallisce, il caricamento viene annullato senza lasciare documenti a metà. Nell'HTML ricavato dai file Word vengono neutralizzati i link `javascript:`; il Markdown è mostrato senza HTML grezzo.
+- **Accesso con password**: le password sono salvate solo come hash scrypt con salt casuale. La sessione è un token firmato con HMAC-SHA256 in un cookie `HttpOnly` e `SameSite=Lax` (il JavaScript della pagina non può leggerlo); la chiave di firma viene dal `.env` o è generata al primo avvio in `backend/storage/`, mai nel codice. Dopo 5 tentativi sbagliati lo stesso utente viene bloccato per 5 minuti; i tentativi falliti compaiono nello storico dell'admin. Le API admin controllano il ruolo lato server (`403` per gli altri).
+- `backend/storage/` (utenti, documenti, chat, storico attività e consumi, chiave delle sessioni) è escluso dal version control.
+- **Esecuzione di codice generato dall'LLM** (il codice scritto da un LLM non è fidato: istruzioni nascoste in un documento o in un file caricato — *prompt injection* — potrebbero spingerlo a generare codice ostile). `executor.py` lo contiene con **quattro barriere indipendenti**:
+  1. **Analisi AST**: blocca import non consentiti (solo pandas, numpy, matplotlib, seaborn, math, statistics, datetime, scipy, collections, itertools), funzioni pericolose (`open`, `exec`, `eval`, `__import__`, `getattr`...), gli attributi *dunder* (`__class__`, `__globals__`, `__subclasses__`...) e l'accesso diretto a `__builtins__`.
+  2. **Builtins ridotti**: il codice gira con un `__builtins__` privo di `open`, `__import__`, `eval`, `getattr`...: anche aggirando l'AST, quelle funzioni non esistono nel namespace.
+  3. **I/O neutralizzato**: pandas e numpy sono esposti al codice tramite un *proxy* che disattiva tutte le funzioni di lettura/scrittura di file o rete (`read_csv`, `to_csv`, `read_json` via URL, `np.load`, `savefig`...), senza modificare i moduli reali. Così il codice non può leggere il `.env` o altri file del server, né esfiltrare dati in rete. I grafici si salvano solo con la funzione `save_chart`.
+  4. **Timeout**: il codice gira sotto un limite di tempo (`DATA_AGENT_EXEC_TIMEOUT`, default 15s); un ciclo troppo lungo viene interrotto senza bloccare il servizio.
+
+  Queste barriere sono verificate da `data_agent/tests/test_executor.py` (lettura del `.env`, accesso alla rete, scrittura su disco, evasione via dunder, alias delle funzioni, timeout).
+  *Limite noto*: non è una sandbox a livello di sistema operativo. Resta fuori portata il limite di memoria rigido e l'interruzione di un ciclo infinito "puro" senza I/O (Python non termina un thread dall'esterno). In produzione il data agent va comunque eseguito in un container isolato, senza rete e senza segreti nell'ambiente, con limiti di CPU e memoria imposti dal sistema.
+- **Upload**: solo estensioni consentite (PDF, DOCX, TXT, MD, CSV, XLSX, XLS), massimo 20 MB, file salvati con nome casuale (id) fuori dalla cartella pubblica. Se l'indicizzazione fallisce, il caricamento viene annullato senza lasciare documenti a metà. Nell'HTML ricavato dai file Word vengono neutralizzati i link `javascript:`; il Markdown è mostrato senza HTML grezzo.
 - Il data agent ascolta solo su `127.0.0.1`. Il backend valida l'input (lunghezza massima) e i nomi dei file dei grafici (regex, niente path traversal) e limita CORS all'origine del frontend.
-- **Dati sensibili** (certificati medici, contratti, offerte di mercato): i file restano sul computer che esegue la piattaforma, ma i pezzi di testo vengono inviati a OpenAI per gli embedding, per l'estrazione dei dati chiave e, quando pertinenti, per le risposte. Senza login, inoltre, chiunque apra l'app vede tutto l'archivio. Per un uso reale servirebbero autenticazione con permessi per categoria (il filtro `ownerId`/`visibility` è già presente nei metadati), un accordo sul trattamento dei dati con il provider o un modello eseguito in locale.
+- **Dati sensibili** (certificati medici, contratti, offerte di mercato): i file restano sul computer che esegue la piattaforma, ma i pezzi di testo vengono inviati a OpenAI per gli embedding, per l'estrazione dei dati chiave e, quando pertinenti, per le risposte. L'archivio è condiviso tra tutti gli utenti collegati. Per un uso reale servirebbero permessi per categoria (il filtro `ownerId`/`visibility` è già presente nei metadati), un accordo sul trattamento dei dati con il provider o un modello eseguito in locale.
 
 ---
 
-## 13. Risoluzione dei problemi
+## 16. Limiti noti
+
+- **Accesso semplice.** Due ruoli (utente e admin), utenti creati al primo avvio, nessuna gestione degli utenti dall'interfaccia né cambio password; l'archivio documenti è condiviso. Il cookie non è `Secure` perché l'app gira in HTTP su localhost: in rete andrebbe servita in HTTPS.
+- **Spesa stimata.** I costi sono calcolati dai token con un listino nel codice (`usageService.js`): la cifra fatturata è quella della dashboard OpenAI. I consumi si registrano da questa versione in poi.
+- **Sandbox del codice solo applicativa.** I controlli AST di `executor.py` bloccano le operazioni pericolose più comuni ma non sostituiscono un container isolato, senza rete e con limiti di CPU e memoria.
+- **Dati chiave estratti dall'AI.** Viene letta solo la parte iniziale del documento (circa 6.000 caratteri) e si estrae **una sola** scadenza per documento; i valori non si correggono a mano. La scheda nel lettore lo segnala ("da verificare sul documento").
+- **Scadenze passate.** Nella Home restano visibili per 60 giorni, poi compaiono solo nel lettore del documento.
+- **Excel.** Viene letto solo il primo foglio con dati.
+- **PDF scansionati.** Senza OCR non contengono testo e vengono rifiutati.
+- **Dati inviati a OpenAI.** Embedding, estrazione dei dati chiave e risposte passano dal provider (vedi [Sicurezza](#15-sicurezza)).
+- **Costi.** Non c'è un limite di richieste: ogni domanda usa il modello di chat e, per le analisi, il pandas agent (2-5 chiamate). L'admin vede la spesa ma non può impostare un tetto.
+- **Avvio con un comando** (`npm run setup`, `npm run dev`, `npm test`) solo su macOS e Linux; su Windows si usano i comandi separati.
+
+---
+
+## 17. Risoluzione dei problemi
 
 | Problema | Soluzione |
 |---|---|

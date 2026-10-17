@@ -84,18 +84,33 @@ _NUMERIC_RE = re.compile(r"^\s*[-+]?[€$£]?\s*[\d.,]+\s*%?\s*[€$£]?\s*$")
 _DATE_HINT = re.compile(r"data|date|scadenza|nascita|giorno|inizio|fine|dal|al", re.I)
 
 
+def _strip_symbols(v) -> str:
+    return str(v).strip().replace("€", "").replace("$", "").replace("£", "").replace("%", "").replace(" ", "")
+
+
+def _is_italian_format(texts: pd.Series) -> bool:
+    """Formato italiano se almeno un valore ha la virgola decimale (1.234,56 / 0,45)
+    o più punti delle migliaia (1.200.000)."""
+    for s in texts:
+        if "," in s and ("." not in s or s.rfind(",") > s.rfind(".")):
+            return True
+        if re.fullmatch(r"[-+]?\d{1,3}(\.\d{3}){2,}", s):
+            return True
+    return False
+
+
 def _to_number(series: pd.Series) -> pd.Series:
+    # il formato si decide sull'intera colonna: "1.200" vale 1200 se la colonna è in formato italiano
+    italian = _is_italian_format(series.dropna().map(_strip_symbols))
+
     def conv(v):
         if pd.isna(v):
             return np.nan
         if isinstance(v, (int, float, np.number)):
             return float(v)
-        s = str(v).strip().replace("€", "").replace("$", "").replace("£", "").replace("%", "").replace(" ", "")
-        # formato italiano 1.234,56 -> 1234.56 ; formato 1,234.56 -> 1234.56
-        if "," in s and "." in s:
-            s = s.replace(".", "").replace(",", ".") if s.rfind(",") > s.rfind(".") else s.replace(",", "")
-        elif "," in s:
-            s = s.replace(",", ".")
+        s = _strip_symbols(v)
+        # italiano 1.234,56 -> 1234.56 ; inglese 1,234.56 -> 1234.56
+        s = s.replace(".", "").replace(",", ".") if italian else s.replace(",", "")
         try:
             return float(s)
         except ValueError:

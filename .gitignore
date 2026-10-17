@@ -11,6 +11,7 @@ npm-debug.log*
 # Python
 .venv/
 __pycache__/
+.pytest_cache/
 *.pyc
 
 # Dati generati a runtime
