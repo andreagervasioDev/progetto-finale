@@ -337,6 +337,8 @@ npm run dev
 
 Il comando avvia in parallelo, con log colorati, ChromaDB, il data agent, il backend e il frontend. Il backend attende che Chroma sia pronto. Apri **http://localhost:5173**.
 
+> **Prima di `npm run dev` le porte 8000, 8001, 3002 e 5173 devono essere libere.** Se un servizio è rimasto acceso da un avvio precedente (per esempio il data agent lanciato a mano), la sua copia dentro `npm run dev` non parte e, quando il processo vecchio si chiude, il servizio resta spento senza avvisi. Per liberare le porte: `lsof -ti :8000,:8001,:3002,:5173 | xargs kill`.
+
 ### Opzione B: 4 terminali (tutti i sistemi operativi)
 
 **Terminale 1: ChromaDB** (database vettoriale locale, dati persistiti in `backend/chroma_data/`)
@@ -682,6 +684,7 @@ curl -X POST http://localhost:3002/api/chat \
 | `OPENAI_API_KEY mancante` | Crea `.env` nella **root** del progetto (non in `backend/`) partendo da `.env.example`, poi riavvia backend e data agent |
 | `/api/health` → `"chroma": "offline"` | Avvia `npm run chroma` in `backend/`; controlla che la porta 8000 sia libera |
 | `/api/health` → `"dataAgent": "offline"` | Avvia `python app.py` in `data_agent/` con il virtualenv attivo |
+| Caricamento Excel/CSV: "Elaborazione non riuscita: verifica che tutti i servizi siano attivi e riprova." | Il data agent è spento (Excel e CSV passano da lui, PDF e Word no). Succede di solito quando era già acceso un data agent avviato a mano: quello di `npm run dev` non riesce a partire, e quando il vecchio si chiude non ne resta nessuno. Ferma tutto, libera le porte con `lsof -ti :8000,:8001,:3002,:5173 \| xargs kill` e rilancia `npm run dev` |
 | `EADDRINUSE` / porta occupata | Cambia `BACKEND_PORT` nel `.env`; se cambi la porta del backend avvia il frontend con `VITE_BACKEND_URL=http://localhost:<porta> npm run dev` |
 | Knowledge base vuota o da aggiornare | `cd backend && npm run ingest:reset` |
 | Pagina Dati: "Dati non disponibili" | Il data agent non è avviato o è una versione vecchia: riavvialo (`python app.py` in `data_agent/`) |

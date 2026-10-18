@@ -59,7 +59,7 @@ async function ensureDefaultUsers() {
       users.push({
         id: randomUUID(),
         username: "admin",
-        name: "Amministratore",
+        name: "Admin",
         role: "Amministratore",
         isAdmin: true,
         passwordHash: await hashPassword(config.auth.defaultAdminPassword),

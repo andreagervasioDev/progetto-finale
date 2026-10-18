@@ -127,7 +127,7 @@ export default function DocumentViewerPage() {
   const meta = categoryMeta(doc.category);
 
   return (
-    <div className={`page viewer-page ${doc.tabular ? "dataset-viewer" : ""}`}>
+    <div className="page viewer-page">
       <header className="viewer-header">
         <Link to={`/documenti?categoria=${doc.category}`} className="back-link">
           <Icon name="back" size={17} /> {doc.categoryLabel}
