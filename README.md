@@ -1,5 +1,7 @@
 # Management AI
 
+> *Quando la passione incontra la tecnologia*
+
 **Piattaforma con agente AI ibrido e multi-tool per la gestione di un club di calcio**
 
 Una piattaforma web per lo staff di un club di Serie A, organizzata in quattro aree (**Home**, **Documenti**, **Assistente AI**, **Dati**), con un assistente AI disponibile in ogni pagina tramite un pannello laterale. Ogni utente può:
@@ -9,7 +11,7 @@ Una piattaforma web per lo staff di un club di Serie A, organizzata in quattro a
 - **caricare file Excel e CSV** che vengono puliti e diventano **analizzabili dal data agent** con grafici, come il dataset delle partite;
 - fare domande su **regolamenti, protocolli medici, linee guida, FAQ e documenti caricati**: l'agente risponde tramite una **RAG su ChromaDB** che cita le fonti, con un link al documento e alla pagina;
 - chiedere **analisi numeriche sui dati delle partite**: l'agente delega a un **pandas agent Python** che pulisce il dataset, scrive ed esegue codice, genera grafici e ne restituisce una sintesi;
-- porre **domande ibride**, per esempio *"Abbiamo rispettato l'obiettivo di incidenza infortuni previsto dal protocollo?"*. In questo caso l'agente recupera prima la regola dalla knowledge base e poi la applica ai dati.
+- porre **domande ibride**, per esempio *"Quali giocatori hanno un wellness medio sotto la soglia di allerta del protocollo nella stagione 2025-26?"*. In questo caso l'agente recupera prima la regola dalla knowledge base e poi la applica ai dati.
 
 L'agente sceglie da solo quale strumento usare (paradigma **ReAct**, Reason + Act, tramite function calling OpenAI). Per ogni risposta l'interfaccia mostra i passi eseguiti: strumenti chiamati, fonti recuperate, codice Python generato e operazioni di pulizia dei dati.
 
@@ -39,11 +41,15 @@ L'agente sceglie da solo quale strumento usare (paradigma **ReAct**, Reason + Ac
 
 ## 1. Scenario aziendale
 
-Il caso aziendale è un club di Serie A **fittizio**, costruito su un caso realistico, che usa la piattaforma **Management AI**. Il reparto considerato è l'**Area Performance & Medical**: preparatori atletici, staff medico, match analyst e allenatore.
+Il caso aziendale è un club di Serie A **fittizio**, costruito su un caso realistico, che usa la piattaforma **Management AI**. La piattaforma serve due aree del club, che lavorano sugli stessi giocatori ma con documenti e decisioni diverse:
+
+- **Direzione e area amministrativa** (direttore sportivo, segreteria, area legale e commerciale): contratti dei giocatori, sponsorizzazioni, offerte di mercato, certificati medici e le relative scadenze;
+- **Area Performance & Medical** (preparatori atletici, staff medico, match analyst e allenatore): regolamento interno, protocolli medici, soglie di carico e dati delle partite.
 
 | Esigenza | Problema oggi | Soluzione |
 |---|---|---|
-| **Informazioni testuali** | Regole su sanzioni, convocazioni, return-to-play, soglie di carico e procedure sono sparse in manuali PDF che nessuno ha tempo di consultare | RAG su 4 documenti interni con citazione delle fonti |
+| **Documenti e scadenze della direzione** | Contratti, accordi con gli sponsor, offerte e certificati sono file sparsi: per sapere quando scade un contratto o quanto vale un bonus bisogna aprirli uno per uno | Archivio per categorie: l'AI propone la categoria, estrae persona, controparte, importo e scadenza, e la Home mostra le prossime scadenze; le domande sui documenti passano dalla RAG |
+| **Informazioni testuali** | Regole su sanzioni, convocazioni, return-to-play, soglie di carico e procedure sono sparse in manuali PDF che nessuno ha tempo di consultare | RAG su 4 documenti interni e sui documenti caricati, con citazione delle fonti |
 | **Insight dai dati** | Le statistiche per partita (GPS, xG, wellness, infortuni) sono in un CSV "sporco" esportato da più sistemi, e ogni analisi richiede un match analyst | Pandas agent che pulisce i dati, analizza, genera grafici e spiega i risultati |
 
 Le due fonti sono **complementari**. La knowledge base definisce le soglie (ACWR > 1,5, wellness < 5, minimo 450 minuti per i ranking per 90', obiettivo di meno di 20 infortuni ogni 1.000 ore), il dataset contiene i numeri a cui applicarle.
@@ -119,11 +125,15 @@ Il data agent Python è a sua volta un agente ReAct: scrive codice pandas, lo es
 ## 4. Struttura del progetto
 
 ```
-Progetto finale/
+progetto-finale/
 ├── .env.example                 # template delle variabili d'ambiente (copiare in .env)
 ├── .gitignore                   # esclude .env, node_modules, .venv, chroma_data, grafici
 ├── package.json                 # script di comodo: setup e avvio di tutti i servizi
 ├── README.md
+│
+├── presentazione/
+│   ├── Progetto finale di Andrea Gervasio.pdf  # presentazione del progetto
+│   └── screenshot/              # schermate dell'app usate nelle slide
 │
 ├── frontend/                    # React 19 + Vite
 │   ├── index.html
@@ -246,6 +256,13 @@ ChromaDB **non** richiede installazioni separate: il server locale è incluso ne
 
 ## 6. Installazione
 
+Scarica il repository ed entra nella cartella:
+
+```bash
+git clone https://github.com/andreagervasioDev/progetto-finale.git
+cd progetto-finale
+```
+
 ### Opzione A: tutto con un comando (macOS / Linux)
 
 Dalla root del progetto:
@@ -290,6 +307,10 @@ npm install
 ## 7. Configurazione (.env)
 
 C'è **un solo file `.env` nella root**, letto sia dal backend Node sia dal data agent Python.
+
+> **Per la correzione**: il file `.env` non è nel repository e viene consegnato a parte. Basta copiarlo nella root del progetto, accanto a `.env.example`, e passare alla [sezione 8](#8-avvio).
+
+Altrimenti crealo dal modello:
 
 ```bash
 cp .env.example .env
@@ -471,7 +492,6 @@ cd data_agent && .venv/bin/python -m pytest -q tests             # Python (pytes
 | Dati | Come è cambiata la distanza media per 90' per ruolo tra le due stagioni? | Data agent |
 | Dati | Quali tipi di infortunio sono più frequenti e quanti giorni di stop causano? | Data agent |
 | Dati | Che problemi di qualità aveva il dataset grezzo? | Data agent (usa `df_raw`) |
-| Ibrida | Abbiamo rispettato l'obiettivo di incidenza infortuni nella stagione 2025-26? | RAG + data agent |
 | Ibrida | Quali giocatori hanno un wellness medio sotto la soglia di allerta? | RAG + data agent |
 | Ibrida | Chi ha la differenza gol − xG più significativa secondo le linee guida? | RAG + data agent |
 | Memoria | *(dopo una domanda sui dati)* "E solo per i difensori?" | Data agent con contesto ricostruito |
