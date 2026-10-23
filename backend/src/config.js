@@ -33,10 +33,14 @@ export const config = {
   maxHistoryMessages: Number(process.env.MAX_HISTORY_MESSAGES || 20),
   // tetto di spesa OpenAI stimata al giorno, in dollari; 0 = nessun limite (rete di sicurezza contro consumi imprevisti)
   dailyBudgetUsd: Number(process.env.DAILY_BUDGET_USD || 0),
+  // online (es. Render): il backend serve anche il frontend compilato (frontend/dist) sullo stesso indirizzo
+  frontendDist: process.env.SERVE_FRONTEND === "true" ? path.resolve(BACKEND_DIR, "..", "frontend", "dist") : null,
   auth: {
     // chiave per firmare le sessioni: se manca viene generata e salvata in storage/.auth_secret
     secret: process.env.AUTH_SECRET || null,
     sessionDays: Number(process.env.SESSION_DAYS || 7),
+    // online, con HTTPS, il cookie di sessione viaggia solo su connessioni cifrate
+    cookieSecure: process.env.COOKIE_SECURE === "true",
     // password degli utenti creati al primo avvio (cambiale nel .env prima di condividere l'app)
     defaultAdminPassword: process.env.DEFAULT_ADMIN_PASSWORD || "admin",
     defaultTestPassword: process.env.DEFAULT_TEST_PASSWORD || "test",

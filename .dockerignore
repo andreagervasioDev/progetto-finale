@@ -1,0 +1,15 @@
+.git
+.env
+.env.*
+!.env.example
+**/node_modules
+**/.venv
+**/__pycache__
+.pytest_cache
+.DS_Store
+frontend/dist
+backend/storage
+backend/chroma_data
+data_agent/datasets
+data_agent/charts/*.png
+presentazione

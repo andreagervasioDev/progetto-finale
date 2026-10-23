@@ -4,12 +4,14 @@
  *   POST /api/auth/logout  cancella il cookie
  */
 import { Router } from "express";
+import { config } from "../config.js";
 import { readCookie } from "../middleware/auth.js";
 import { publicUser } from "../repositories/userRepository.js";
 import { logActivity } from "../services/activityService.js";
 import { SESSION_COOKIE, createSessionToken, login, sessionMaxAgeSeconds, verifySessionToken } from "../services/authService.js";
 
-const cookie = (value, maxAge) => `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
+const cookie = (value, maxAge) =>
+  `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${config.auth.cookieSecure ? "; Secure" : ""}`;
 
 export const authRouter = Router();
 

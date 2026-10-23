@@ -2,6 +2,7 @@
  * Applicazione Express: middleware e montaggio delle rotte. Non apre porte né contatta servizi esterni,
  * così può essere importata anche dai test (vedi tests/http.test.js). L'avvio è in server.js.
  */
+import path from "node:path";
 import cors from "cors";
 import express from "express";
 import { config } from "./config.js";
@@ -45,6 +46,12 @@ export function createApp() {
   );
 
   app.use("/api", (_req, res) => res.status(404).json({ error: "Endpoint non trovato." }));
+
+  // online: frontend compilato sullo stesso indirizzo; le pagine di React Router ricevono index.html
+  if (config.frontendDist) {
+    app.use(express.static(config.frontendDist));
+    app.get(/.*/, (_req, res) => res.sendFile(path.join(config.frontendDist, "index.html")));
+  }
 
   // gestore finale degli errori: senza, Express risponderebbe con la traccia completa dell'errore
   // (percorsi dei file sul server compresi). Al client va solo un messaggio generico, il dettaglio nei log.

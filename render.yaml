@@ -1,0 +1,49 @@
+# Blueprint Render: tutta la piattaforma (ChromaDB + data agent + backend + frontend) in un solo servizio.
+# Render → New → Blueprint → scegli questo repository. Al primo avvio chiede i valori con "sync: false".
+services:
+  - type: web
+    name: management-ai
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # piano gratuito: niente disco permanente, quindi utenti, conversazioni e documenti caricati
+    # si azzerano a ogni riavvio o deploy; documenti ufficiali e dataset partite si ricaricano dal repository.
+    # Dopo 15 minuti senza visite il servizio si spegne (un ping esterno, es. UptimeRobot, lo tiene sveglio).
+    plan: free
+    region: frankfurt
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      # --- segreti: Render li chiede alla creazione del Blueprint ---
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: DEFAULT_ADMIN_PASSWORD
+        sync: false
+      - key: DEFAULT_TEST_PASSWORD
+        sync: false
+      - key: AUTH_SECRET
+        generateValue: true
+      # --- tetto di spesa OpenAI stimata al giorno (dollari): il sito è pubblico ---
+      - key: DAILY_BUDGET_USD
+        value: "1"
+      # --- modelli ---
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: OPENAI_EMBEDDING_MODEL
+        value: text-embedding-3-small
+      # --- online: porta di Render, HTTPS, frontend servito dal backend ---
+      - key: PORT
+        value: "10000"
+      - key: BACKEND_PORT
+        value: "10000"
+      - key: SERVE_FRONTEND
+        value: "true"
+      - key: COOKIE_SECURE
+        value: "true"
+      # --- cartella dei dati nel container (temporanea sul piano free) ---
+      - key: DATA_DIR
+        value: /data
+      - key: STORAGE_DIR
+        value: /data/storage
+      - key: DATASETS_DIR
+        value: /data/datasets

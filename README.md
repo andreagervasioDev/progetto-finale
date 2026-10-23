@@ -130,6 +130,9 @@ progetto-finale/
 ├── .gitignore                   # esclude .env, node_modules, .venv, chroma_data, grafici
 ├── package.json                 # script di comodo: setup e avvio di tutti i servizi
 ├── README.md
+├── Dockerfile, .dockerignore    # immagine unica per il deploy online
+├── render.yaml                  # Blueprint Render (vedi "Deploy online")
+├── deploy/start.sh              # avvio dei tre servizi nel container
 │
 ├── presentazione/
 │   ├── Progetto finale di Andrea Gervasio.pdf  # presentazione del progetto
@@ -441,6 +444,20 @@ Le password sono salvate come hash (scrypt) in `backend/storage/users.json`; que
   cd backend
   npm run ingest:reset
   ```
+
+### Deploy online (facoltativo)
+
+Per la correzione basta l'avvio in locale. Per una demo online il repository contiene un **Blueprint Render**:
+
+- `Dockerfile`: un solo container con ChromaDB, data agent e backend, che si parlano su `127.0.0.1` come in locale; il backend serve anche il frontend compilato (`SERVE_FRONTEND=true`);
+- `deploy/start.sh`: avvia i tre processi e mette dati, indice e grafici nella cartella `/data`;
+- `render.yaml`: servizio web sul **piano gratuito**, cookie `Secure`, tetto di spesa di 1 dollaro al giorno.
+
+Il piano gratuito non ha un disco permanente: utenti, conversazioni e documenti caricati si azzerano a ogni riavvio e a ogni deploy (anche a ogni `git push`), mentre i documenti ufficiali e il dataset delle partite si ricaricano dal repository. Dopo 15 minuti senza visite il servizio si spegne e la visita successiva aspetta circa un minuto: per tenerlo acceso basta un controllo esterno ogni 5-10 minuti su `/api/health`, per esempio con UptimeRobot. Per conservare i dati serve un piano a pagamento con un disco montato in `/data`.
+
+Su Render: **New → Blueprint**, scegli il repository e inserisci `OPENAI_API_KEY`, `DEFAULT_ADMIN_PASSWORD` e `DEFAULT_TEST_PASSWORD` (non usare `admin` e `test` su un sito pubblico). L'app è all'indirizzo del servizio, per esempio `https://management-ai.onrender.com`.
+
+Se il frontend è pubblicato anche su **Netlify**, `frontend/public/_redirects` inoltra `/api/*` al servizio Render: controlla che l'indirizzo nel file sia quello del tuo servizio. Il proxy di Netlify chiude le richieste che non iniziano a rispondere entro 26 secondi: la chat non ne risente, perché lo streaming parte subito, mentre il caricamento di un PDF molto lungo può fallire. In quel caso usa direttamente l'indirizzo Render.
 
 ---
 
