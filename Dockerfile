@@ -1,7 +1,8 @@
 # Immagine unica per il deploy online (Render): ChromaDB, data agent Python e backend Node
 # girano nello stesso container e si parlano su 127.0.0.1, come in locale.
 # Il backend serve anche il frontend compilato. I dati stanno in /data (permanente solo con un disco).
-FROM node:22-bookworm-slim
+# Debian 13 (trixie): il server ChromaDB precompilato richiede glibc 2.38 o superiore (bookworm ha la 2.36)
+FROM node:22-trixie-slim
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 python3-venv \
