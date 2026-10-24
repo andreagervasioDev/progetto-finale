@@ -368,7 +368,7 @@ npm run dev
 
 Il comando avvia in parallelo, con log colorati, ChromaDB, il data agent, il backend e il frontend. Il backend attende che Chroma sia pronto. Apri **http://localhost:5173**.
 
-> **Prima di `npm run dev` le porte 8000, 8001, 3002 e 5173 devono essere libere.** Se un servizio è rimasto acceso da un avvio precedente (per esempio il data agent lanciato a mano), la sua copia dentro `npm run dev` non parte e, quando il processo vecchio si chiude, il servizio resta spento senza avvisi. Per liberare le porte: `lsof -ti :8000,:8001,:3002,:5173 | xargs kill`.
+> **Prima di `npm run dev` le porte 8000, 8001, 3002 e 5173 devono essere libere.** Se un servizio è rimasto acceso da un avvio precedente (per esempio il data agent lanciato a mano), la sua copia dentro `npm run dev` non parte e, quando il processo vecchio si chiude, il servizio resta spento senza avvisi. Per liberare le porte: `lsof -ti tcp:8000,8001,3002,5173 | xargs kill`.
 
 ### Opzione B: 4 terminali (tutti i sistemi operativi)
 
@@ -463,7 +463,7 @@ Per la correzione basta l'avvio in locale. Per una demo online il repository con
 
 Il piano gratuito non ha un disco permanente: utenti, conversazioni e documenti caricati si azzerano a ogni riavvio e a ogni deploy (anche a ogni `git push`), mentre i documenti ufficiali e il dataset delle partite si ricaricano dal repository. Dopo 15 minuti senza visite il servizio si spegne e la visita successiva aspetta circa un minuto: per tenerlo acceso basta un controllo esterno ogni 5-10 minuti su `/api/health`, per esempio con UptimeRobot. Per conservare i dati serve un piano a pagamento con un disco montato in `/data`.
 
-Su Render: **New → Blueprint**, scegli il repository e inserisci `OPENAI_API_KEY`, `DEFAULT_ADMIN_PASSWORD` e `DEFAULT_TEST_PASSWORD` (non usare `admin` e `test` su un sito pubblico). L'app è all'indirizzo del servizio, per esempio `https://management-ai.onrender.com`.
+Su Render: **New → Blueprint**, scegli il repository e inserisci `OPENAI_API_KEY`, `DEFAULT_ADMIN_PASSWORD` e `DEFAULT_TEST_PASSWORD` (non usare `admin` e `test` su un sito pubblico). L'app è all'indirizzo del servizio: la demo di questo progetto è su **https://management-ai-r5nl.onrender.com**. Rinominare il servizio su Render non cambia l'indirizzo.
 
 Se il frontend è pubblicato anche su **Netlify**, `frontend/public/_redirects` inoltra `/api/*` al servizio Render: controlla che l'indirizzo nel file sia quello del tuo servizio. Il proxy di Netlify chiude le richieste che non iniziano a rispondere entro 26 secondi: la chat non ne risente, perché lo streaming parte subito, mentre il caricamento di un PDF molto lungo può fallire. In quel caso usa direttamente l'indirizzo Render.
 
@@ -756,7 +756,7 @@ curl -X POST http://localhost:3002/api/chat \
 | `OPENAI_API_KEY mancante` | Crea `.env` nella **root** del progetto (non in `backend/`) partendo da `.env.example`, poi riavvia backend e data agent |
 | `/api/health` → `"chroma": "offline"` | Avvia `npm run chroma` in `backend/`; controlla che la porta 8000 sia libera |
 | `/api/health` → `"dataAgent": "offline"` | Avvia `python app.py` in `data_agent/` con il virtualenv attivo |
-| Caricamento Excel/CSV: "Elaborazione non riuscita: verifica che tutti i servizi siano attivi e riprova." | Il data agent è spento (Excel e CSV passano da lui, PDF e Word no). Succede di solito quando era già acceso un data agent avviato a mano: quello di `npm run dev` non riesce a partire, e quando il vecchio si chiude non ne resta nessuno. Ferma tutto, libera le porte con `lsof -ti :8000,:8001,:3002,:5173 \| xargs kill` e rilancia `npm run dev` |
+| Caricamento Excel/CSV: "Elaborazione non riuscita: verifica che tutti i servizi siano attivi e riprova." | Il data agent è spento (Excel e CSV passano da lui, PDF e Word no). Succede di solito quando era già acceso un data agent avviato a mano: quello di `npm run dev` non riesce a partire, e quando il vecchio si chiude non ne resta nessuno. Ferma tutto, libera le porte con `lsof -ti tcp:8000,8001,3002,5173 \| xargs kill` e rilancia `npm run dev` |
 | `EADDRINUSE` / porta occupata | Cambia `BACKEND_PORT` nel `.env`; se cambi la porta del backend avvia il frontend con `VITE_BACKEND_URL=http://localhost:<porta> npm run dev` |
 | Knowledge base vuota o da aggiornare | `cd backend && npm run ingest:reset` |
 | Pagina Dati: "Dati non disponibili" | Il data agent non è avviato o è una versione vecchia: riavvialo (`python app.py` in `data_agent/`) |

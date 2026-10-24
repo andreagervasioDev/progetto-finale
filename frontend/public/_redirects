@@ -1,4 +1,4 @@
 # Netlify: le API vanno al backend su Render (stesso indirizzo per il browser, così il cookie di login funziona)
-/api/*  https://management-ai.onrender.com/api/:splat  200
+/api/*  https://management-ai-r5nl.onrender.com/api/:splat  200
 # pagine di React Router (/documenti, /dati...): sempre index.html
 /*      /index.html  200

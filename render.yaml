@@ -2,7 +2,7 @@
 # Render → New → Blueprint → scegli questo repository. Al primo avvio chiede i valori con "sync: false".
 services:
   - type: web
-    name: management-ai
+    name: progetto-management-ai
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
