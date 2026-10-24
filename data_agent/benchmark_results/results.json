@@ -1,0 +1,323 @@
+{
+  "date": "2026-10-24T16:01:51",
+  "machine": {
+    "python": "3.13.9",
+    "pandas": "3.0.6",
+    "numpy": "2.5.3",
+    "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+    "processor": "arm"
+  },
+  "duckdb": "2.0.0",
+  "repeat": 3,
+  "results": [
+    {
+      "rows": 1578,
+      "steps": {
+        "Caricamento CSV": {
+          "seconds": 0.0032,
+          "peak_mb": 0.8
+        },
+        "Pulizia": {
+          "seconds": 0.0712,
+          "peak_mb": 2.3
+        },
+        "Classifica marcatori": {
+          "seconds": 0.001,
+          "peak_mb": 0.3
+        },
+        "Distanza per 90' per ruolo": {
+          "seconds": 0.0011,
+          "peak_mb": 0.6
+        },
+        "Wellness sotto soglia": {
+          "seconds": 0.0006,
+          "peak_mb": 0.3
+        },
+        "Incidenza infortuni": {
+          "seconds": 0.0002,
+          "peak_mb": 0.1
+        },
+        "ACWR (carico acuto/cronico)": {
+          "seconds": 0.0041,
+          "peak_mb": 1.6
+        }
+      },
+      "csv_mb": 0.3,
+      "clean_rows": 1539,
+      "raw_dataframe_mb": 1.4,
+      "dataframe_mb": 1.2,
+      "startup_peak_mb": 3.7,
+      "duckdb": {
+        "Classifica marcatori": {
+          "seconds": 0.0016,
+          "peak_mb": 0.0
+        },
+        "Distanza per 90' per ruolo": {
+          "seconds": 0.0017,
+          "peak_mb": 0.0
+        },
+        "Wellness sotto soglia": {
+          "seconds": 0.0015,
+          "peak_mb": 0.0
+        },
+        "Incidenza infortuni": {
+          "seconds": 0.0013,
+          "peak_mb": 0.0
+        },
+        "ACWR (carico acuto/cronico)": {
+          "seconds": 0.0025,
+          "peak_mb": 0.0
+        }
+      }
+    },
+    {
+      "rows": 10000,
+      "steps": {
+        "Caricamento CSV": {
+          "seconds": 0.017,
+          "peak_mb": 3.8
+        },
+        "Pulizia": {
+          "seconds": 0.3458,
+          "peak_mb": 13.6
+        },
+        "Classifica marcatori": {
+          "seconds": 0.002,
+          "peak_mb": 1.7
+        },
+        "Distanza per 90' per ruolo": {
+          "seconds": 0.0029,
+          "peak_mb": 3.5
+        },
+        "Wellness sotto soglia": {
+          "seconds": 0.0016,
+          "peak_mb": 1.7
+        },
+        "Incidenza infortuni": {
+          "seconds": 0.0006,
+          "peak_mb": 0.4
+        },
+        "ACWR (carico acuto/cronico)": {
+          "seconds": 0.0073,
+          "peak_mb": 9.5
+        }
+      },
+      "csv_mb": 1.6,
+      "clean_rows": 9760,
+      "raw_dataframe_mb": 8.7,
+      "dataframe_mb": 7.3,
+      "startup_peak_mb": 22.3,
+      "duckdb": {
+        "Classifica marcatori": {
+          "seconds": 0.0017,
+          "peak_mb": 0.0
+        },
+        "Distanza per 90' per ruolo": {
+          "seconds": 0.0016,
+          "peak_mb": 0.0
+        },
+        "Wellness sotto soglia": {
+          "seconds": 0.0016,
+          "peak_mb": 0.0
+        },
+        "Incidenza infortuni": {
+          "seconds": 0.0014,
+          "peak_mb": 0.0
+        },
+        "ACWR (carico acuto/cronico)": {
+          "seconds": 0.0029,
+          "peak_mb": 0.1
+        }
+      }
+    },
+    {
+      "rows": 50000,
+      "steps": {
+        "Caricamento CSV": {
+          "seconds": 0.0713,
+          "peak_mb": 18.7
+        },
+        "Pulizia": {
+          "seconds": 1.6549,
+          "peak_mb": 67.4
+        },
+        "Classifica marcatori": {
+          "seconds": 0.0064,
+          "peak_mb": 8.4
+        },
+        "Distanza per 90' per ruolo": {
+          "seconds": 0.0117,
+          "peak_mb": 17.1
+        },
+        "Wellness sotto soglia": {
+          "seconds": 0.0062,
+          "peak_mb": 8.4
+        },
+        "Incidenza infortuni": {
+          "seconds": 0.002,
+          "peak_mb": 1.8
+        },
+        "ACWR (carico acuto/cronico)": {
+          "seconds": 0.0203,
+          "peak_mb": 47.4
+        }
+      },
+      "csv_mb": 8.1,
+      "clean_rows": 48769,
+      "raw_dataframe_mb": 43.4,
+      "dataframe_mb": 36.7,
+      "startup_peak_mb": 110.8,
+      "duckdb": {
+        "Classifica marcatori": {
+          "seconds": 0.0027,
+          "peak_mb": 0.0
+        },
+        "Distanza per 90' per ruolo": {
+          "seconds": 0.0029,
+          "peak_mb": 0.0
+        },
+        "Wellness sotto soglia": {
+          "seconds": 0.0024,
+          "peak_mb": 0.0
+        },
+        "Incidenza infortuni": {
+          "seconds": 0.0021,
+          "peak_mb": 0.0
+        },
+        "ACWR (carico acuto/cronico)": {
+          "seconds": 0.0081,
+          "peak_mb": 0.1
+        }
+      }
+    },
+    {
+      "rows": 100000,
+      "steps": {
+        "Caricamento CSV": {
+          "seconds": 0.1382,
+          "peak_mb": 37.4
+        },
+        "Pulizia": {
+          "seconds": 3.3057,
+          "peak_mb": 134.7
+        },
+        "Classifica marcatori": {
+          "seconds": 0.0143,
+          "peak_mb": 16.7
+        },
+        "Distanza per 90' per ruolo": {
+          "seconds": 0.0239,
+          "peak_mb": 34.2
+        },
+        "Wellness sotto soglia": {
+          "seconds": 0.012,
+          "peak_mb": 16.7
+        },
+        "Incidenza infortuni": {
+          "seconds": 0.0043,
+          "peak_mb": 3.5
+        },
+        "ACWR (carico acuto/cronico)": {
+          "seconds": 0.0417,
+          "peak_mb": 94.8
+        }
+      },
+      "csv_mb": 16.1,
+      "clean_rows": 97536,
+      "raw_dataframe_mb": 86.9,
+      "dataframe_mb": 73.4,
+      "startup_peak_mb": 221.6,
+      "duckdb": {
+        "Classifica marcatori": {
+          "seconds": 0.0041,
+          "peak_mb": 0.0
+        },
+        "Distanza per 90' per ruolo": {
+          "seconds": 0.0042,
+          "peak_mb": 0.0
+        },
+        "Wellness sotto soglia": {
+          "seconds": 0.0036,
+          "peak_mb": 0.0
+        },
+        "Incidenza infortuni": {
+          "seconds": 0.0029,
+          "peak_mb": 0.0
+        },
+        "ACWR (carico acuto/cronico)": {
+          "seconds": 0.0132,
+          "peak_mb": 0.1
+        }
+      }
+    },
+    {
+      "rows": 250000,
+      "steps": {
+        "Caricamento CSV": {
+          "seconds": 0.3384,
+          "peak_mb": 93.4
+        },
+        "Pulizia": {
+          "seconds": 8.2574,
+          "peak_mb": 336.4
+        },
+        "Classifica marcatori": {
+          "seconds": 0.0309,
+          "peak_mb": 43.2
+        },
+        "Distanza per 90' per ruolo": {
+          "seconds": 0.06,
+          "peak_mb": 88.5
+        },
+        "Wellness sotto soglia": {
+          "seconds": 0.03,
+          "peak_mb": 43.2
+        },
+        "Incidenza infortuni": {
+          "seconds": 0.01,
+          "peak_mb": 11.8
+        },
+        "ACWR (carico acuto/cronico)": {
+          "seconds": 0.1048,
+          "peak_mb": 236.8
+        }
+      },
+      "csv_mb": 40.5,
+      "clean_rows": 243828,
+      "raw_dataframe_mb": 217.4,
+      "dataframe_mb": 183.5,
+      "startup_peak_mb": 553.8,
+      "duckdb": {
+        "Classifica marcatori": {
+          "seconds": 0.0069,
+          "peak_mb": 0.0
+        },
+        "Distanza per 90' per ruolo": {
+          "seconds": 0.0076,
+          "peak_mb": 0.0
+        },
+        "Wellness sotto soglia": {
+          "seconds": 0.0065,
+          "peak_mb": 0.0
+        },
+        "Incidenza infortuni": {
+          "seconds": 0.005,
+          "peak_mb": 0.0
+        },
+        "ACWR (carico acuto/cronico)": {
+          "seconds": 0.0216,
+          "peak_mb": 0.1
+        }
+      }
+    }
+  ],
+  "recommendation": {
+    "interactive_seconds": 1.0,
+    "memory_budget_mb": 256,
+    "first_slow": null,
+    "first_over_memory": {
+      "rows": 250000,
+      "estimated_mb": 553.8
+    }
+  }
+}

@@ -1,6 +1,8 @@
-# Dipendenze per i test (pytest) e per il controllo delle vulnerabilità (pip-audit):
+# Dipendenze per i test (pytest), il controllo delle vulnerabilità (pip-audit)
+# e il confronto con DuckDB nel benchmark (benchmark.py):
 # pip install -r requirements-dev.txt
 -r requirements.txt
 pytest>=8.0
 httpx>=0.27
 pip-audit>=2.7
+duckdb>=1.1

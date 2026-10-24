@@ -475,6 +475,17 @@ button:disabled {
   color: var(--data);
 }
 
+.cached-note {
+  display: inline-block;
+  margin: 0 0 8px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .chip.failed {
   background: var(--danger-soft);
   color: var(--danger);
@@ -2518,6 +2529,26 @@ pre.output {
 }
 
 /* ---------- Dati ---------- */
+.validation-alert {
+  margin-bottom: 18px;
+  padding: 12px 16px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, white);
+  border-radius: var(--radius);
+  background: var(--danger-soft);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.validation-alert.warning {
+  border-color: color-mix(in srgb, var(--data) 35%, white);
+  background: var(--data-soft);
+}
+
+.validation-alert ul {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+
 .kpis {
   display: grid;
   grid-template-columns: repeat(6, 1fr);

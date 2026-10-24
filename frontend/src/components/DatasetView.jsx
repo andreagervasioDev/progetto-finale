@@ -91,6 +91,27 @@ export default function DatasetView({ datasetId, onError }) {
         ))}
       </section>
 
+      {data.validation && !data.validation.ok && (
+        <section className="validation-alert" role="alert">
+          <strong>Controllo del CSV all'avvio: problemi trovati</strong>
+          <ul>
+            {data.validation.errors.map((e, i) => (
+              <li key={i}>{e}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {data.validation?.warnings.length > 0 && (
+        <section className="validation-alert warning">
+          <strong>Controllo del CSV all'avvio: avvisi</strong>
+          <ul>
+            {data.validation.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <div className="data-grid">
         <section className="panel">
           <header>

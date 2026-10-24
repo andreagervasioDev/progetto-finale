@@ -18,5 +18,7 @@ healthRouter.get("/", async (_req, res) => {
     knowledgeBaseChunks: kbChunks,
     dataAgent: dataAgent ? "ok" : "offline",
     datasetRows: dataAgent?.dataset_rows ?? null,
+    // controllo di colonne e tipi del CSV fatto dal data agent all'avvio
+    dataValidation: dataAgent?.validation ?? null,
   });
 });

@@ -34,6 +34,7 @@ load_dotenv(BASE_DIR.parent / ".env")  # .env unico nella root del progetto
 from agent import CHARTS_DIR, SCHEMA_DESCRIPTION, PandasAgent  # noqa: E402
 from cleaning import quality_summary  # noqa: E402
 from datasets import BUILTIN_ID, Dataset, DatasetError, DatasetStore  # noqa: E402
+from validation import SchemaError  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [data_agent] %(message)s")
 log = logging.getLogger(__name__)
@@ -45,9 +46,22 @@ state: dict = {}
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    store = DatasetStore(DATASET_PATH, SCHEMA_DESCRIPTION)
+    try:
+        store = DatasetStore(DATASET_PATH, SCHEMA_DESCRIPTION)
+    except SchemaError as e:
+        # il CSV non ha la struttura attesa: meglio fermarsi con un messaggio chiaro che analizzare dati sbagliati
+        log.error("Dataset partite NON valido (%s): %s", DATASET_PATH.name, e)
+        log.error("Il data agent non parte: correggi il CSV o rigeneralo con data/generate_dataset.py")
+        raise SystemExit(1) from e
     builtin = store.get(BUILTIN_ID)
     log.info("Dataset partite: %s righe grezze -> %s righe pulite", builtin.report.rows_raw, builtin.report.rows_clean)
+    check = builtin.validation
+    for msg in check.errors:
+        log.error("Validazione dataset partite: %s", msg)
+    for msg in check.warnings:
+        log.warning("Validazione dataset partite: %s", msg)
+    if check.ok:
+        log.info("Validazione dataset partite: colonne e tipi corretti")
     log.info("Dataset caricati dagli utenti: %s", len(store.list()) - 1)
     state["store"] = store
     if os.getenv("OPENAI_API_KEY", "").strip() in ("", "sk-..."):
@@ -117,6 +131,7 @@ def health():
         "dataset_rows": len(builtin.clean),
         "datasets": len(_store().list()),
         "llm_ready": "agent" in state,
+        "validation": builtin.validation.to_dict(),
     }
 
 
@@ -162,6 +177,7 @@ def dataset_overview(dataset_id: str, rows: int = 50):
         "duplicates_raw": int(ds.raw.duplicated().sum()),
         "preview_clean": _records(clean.head(rows)),
         "preview_raw": _records(ds.raw.head(rows)),
+        "validation": ds.validation.to_dict() if ds.builtin else None,
     }
 
 

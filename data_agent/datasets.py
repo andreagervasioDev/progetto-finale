@@ -16,13 +16,14 @@ import json
 import os
 import re
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from cleaning import CleaningReport, clean_dataset
+from validation import ValidationResult, validate
 
 BASE_DIR = Path(__file__).parent
 DATASETS_DIR = Path(os.getenv("DATASETS_DIR", BASE_DIR / "datasets"))
@@ -50,6 +51,8 @@ class Dataset:
     clean: pd.DataFrame
     report: CleaningReport
     schema: str  # descrizione delle colonne passata all'LLM
+    # controlli di colonne e tipi fatti all'avvio (solo per il dataset partite)
+    validation: ValidationResult = field(default_factory=ValidationResult)
 
     def summary(self) -> dict:
         return {
@@ -223,9 +226,10 @@ class DatasetStore:
         self._items: dict[str, Dataset] = {}
 
         raw = pd.read_csv(builtin_path)
-        clean, report = clean_dataset(raw)
+        # colonne attese, pulizia e tipi: solleva SchemaError se il CSV non si puo' usare
+        clean, report, validation = validate(raw, clean_dataset)
         self._items[BUILTIN_ID] = Dataset(BUILTIN_ID, "Dati partite (prestazioni giocatori)", builtin_path.name,
-                                          True, raw, clean, report, builtin_schema)
+                                          True, raw, clean, report, builtin_schema, validation)
         for entry in self._read_registry():
             try:
                 self._load(entry["id"], entry["title"], entry["filename"])

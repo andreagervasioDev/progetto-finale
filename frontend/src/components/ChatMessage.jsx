@@ -12,7 +12,7 @@ const DataChart = lazy(() => import("./DataChart.jsx"));
 const time = (ts) => new Date(ts).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
 
 export default function ChatMessage({ message, compact = false }) {
-  const { role, content, charts, tables, trace, sources, error, createdAt, document } = message;
+  const { role, content, charts, tables, trace, sources, error, createdAt, document, cached } = message;
   // grafici con i dati (JSON) → disegnati in React; senza (conversazioni precedenti, save_chart) → immagine PNG
   const dataCharts = charts?.filter((c) => c.spec) ?? [];
   const imageCharts = charts?.filter((c) => !c.spec) ?? [];
@@ -39,6 +39,11 @@ export default function ChatMessage({ message, compact = false }) {
         <img src="/logo-icon.png" alt="" />
       </div>
       <div className={`bubble ${error ? "error" : ""}`}>
+        {cached && (
+          <p className="cached-note" title="La stessa domanda aveva già una risposta valida: nessuna nuova chiamata all'AI">
+            Risposta dalla cache
+          </p>
+        )}
         {trace?.length > 0 && <ToolTrace trace={trace} sources={sources} />}
         <div className="markdown">
           {error ? (

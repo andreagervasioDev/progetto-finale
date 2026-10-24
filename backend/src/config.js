@@ -33,6 +33,11 @@ export const config = {
   maxHistoryMessages: Number(process.env.MAX_HISTORY_MESSAGES || 20),
   // tetto di spesa OpenAI stimata al giorno, in dollari; 0 = nessun limite (rete di sicurezza contro consumi imprevisti)
   dailyBudgetUsd: Number(process.env.DAILY_BUDGET_USD || 0),
+  // cache delle risposte già date (primo messaggio di una conversazione); durata 0 = cache disattivata
+  answerCache: {
+    ttlHours: Number(process.env.QUERY_CACHE_TTL_HOURS || 24),
+    maxEntries: Number(process.env.QUERY_CACHE_MAX_ENTRIES || 200),
+  },
   // online (es. Render): il backend serve anche il frontend compilato (frontend/dist) sullo stesso indirizzo
   frontendDist: process.env.SERVE_FRONTEND === "true" ? path.resolve(BACKEND_DIR, "..", "frontend", "dist") : null,
   auth: {

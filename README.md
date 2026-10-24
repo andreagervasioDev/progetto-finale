@@ -201,6 +201,7 @@ progetto-finale/
 │       │   ├── authService.js         # login, sessioni firmate (cookie HttpOnly), blocco dei tentativi
 │       │   ├── passwordService.js     # hash delle password con scrypt
 │       │   ├── usageService.js        # token consumati, prezzi e spesa stimata
+│       │   ├── answerCacheService.js  # cache delle risposte già date (chiave, scadenza, limite)
 │       │   ├── activityService.js     # storico di accessi, domande, ricerche e caricamenti
 │       │   ├── requestContext.js      # utente della richiesta in corso (per attribuire token e attività)
 │       │   ├── datasetService.js      # dataset analizzabili (partite + file caricati)
@@ -213,6 +214,7 @@ progetto-finale/
 │       │   └── ingest.js        # sincronizzazione/re-indicizzazione da riga di comando
 │       ├── repositories/        # dati salvati su disco (backend/storage/)
 │       │   ├── conversationRepository.js # conversazioni per utente, scrittura atomica
+│       │   ├── answerCacheRepository.js  # risposte in cache (answer_cache.json)
 │       │   ├── documentRepository.js     # metadati (documents.json) e file (files/)
 │       │   ├── userRepository.js         # utenti con password (hash scrypt) e ruolo admin (users.json)
 │       │   └── eventLogRepository.js     # registri attività e consumo token (activity.jsonl, usage.jsonl)
@@ -232,8 +234,11 @@ progetto-finale/
     ├── charts.py                # chart() e table(): JSON per il frontend React + PNG con matplotlib
     ├── executor.py              # sandbox: AST + builtins ridotti + I/O neutralizzato + timeout
     ├── cleaning.py              # pipeline di data cleaning dedicata al dataset partite
+    ├── validation.py            # controllo all'avvio di colonne e tipi del CSV partite
+    ├── benchmark.py             # tempi e memoria delle analisi su dataset sempre più grandi
+    ├── benchmark_results/       # ultimo report del benchmark (results.md, results.json)
     ├── datasets/                # file Excel/CSV caricati dagli utenti (escluso da git)
-    ├── tests/                   # test pytest: pulizia, interprete, dataset, API
+    ├── tests/                   # test pytest: pulizia, validazione, interprete, dataset, benchmark, API
     ├── requirements.txt
     ├── requirements-dev.txt     # requirements.txt + pytest e httpx per i test
     ├── charts/                  # PNG generati a runtime
@@ -341,6 +346,8 @@ OPENAI_API_KEY=sk-...la-tua-chiave...
 | `DATA_AGENT_MAX_STEPS` | `8` | Passi ReAct massimi del pandas agent |
 | `MAX_HISTORY_MESSAGES` | `20` | Messaggi di cronologia inviati all'LLM |
 | `DAILY_BUDGET_USD` | `0` | Tetto di spesa OpenAI stimata al giorno (dollari); `0` = nessun limite |
+| `QUERY_CACHE_TTL_HOURS` | `24` | Durata delle risposte in cache, in ore; `0` = cache disattivata |
+| `QUERY_CACHE_MAX_ENTRIES` | `200` | Numero massimo di risposte conservate in cache |
 | `DEFAULT_ADMIN_PASSWORD` / `DEFAULT_TEST_PASSWORD` | `admin` / `test` | Password degli utenti creati al primo avvio |
 | `AUTH_SECRET` | generata | Chiave che firma le sessioni; se manca viene creata in `backend/storage/.auth_secret` |
 | `SESSION_DAYS` | `7` | Durata della sessione dopo il login |
@@ -429,7 +436,8 @@ Le password sono salvate come hash (scrypt) in `backend/storage/users.json`; que
 
 - Controlla lo stato di tutti i servizi con: `curl http://localhost:3002/api/health`
   ```json
-  {"backend":"ok","chroma":"ok","knowledgeBaseChunks":37,"dataAgent":"ok","datasetRows":1539,"openaiKeyConfigured":true}
+  {"backend":"ok","chroma":"ok","knowledgeBaseChunks":37,"dataAgent":"ok","datasetRows":1539,"openaiKeyConfigured":true,
+   "dataValidation":{"ok":true,"errors":[],"warnings":[]}}
   ```
 - Documentazione interattiva del data agent: http://localhost:8001/docs
 
@@ -486,6 +494,7 @@ cd data_agent && .venv/bin/python -m pytest -q tests             # Python (pytes
 | `backend/tests/deadlines.test.js` | calcolo dei giorni alla scadenza, ordinamento, scadenze passate |
 | `backend/tests/agent.test.js` | definizione dei tool per il function calling, contenuto del system prompt, fonti |
 | `backend/tests/http.test.js` | API reali su una porta casuale: login e sessione (401, cookie manomesso, blocco dopo 5 tentativi), permessi admin (403), storico delle ricerche, validazione della chat, upload rifiutati, path traversal |
+| `backend/tests/answerCache.test.js` | cache delle risposte: domanda normalizzata, chiave che cambia con documento aperto, archivio e modello, scadenza, limite di voci, risposte con errori non salvate |
 | `backend/tests/usage.test.js` | hash delle password, firma e scadenza delle sessioni, prezzi dei modelli, calcolo della spesa e riepiloghi della dashboard |
 | `backend/tests/budget.test.js` | tetto di spesa giornaliero: somma della spesa di oggi e blocco (402) al raggiungimento del limite |
 | `data_agent/tests/test_cleaning.py` | il CSV ha ≥ 1000 righe e anomalie; dopo la pulizia 1.539 righe, niente duplicati, date, categorie e range corretti |
@@ -494,6 +503,8 @@ cd data_agent && .venv/bin/python -m pytest -q tests             # Python (pytes
 | `backend/tests/fileCheck.test.js` | controllo del contenuto dei file caricati: firma del formato (eseguibile rinominato `.pdf`, binario rinominato `.csv`), zip bomb (dimensione, rapporto di compressione, numero di elementi), archivi danneggiati |
 | `backend/tests/sanitize.test.js` | pulizia dell'HTML dei file Word: rimozione di script, gestori di eventi, iframe, link `javascript:` e immagini `data:text/html`; formattazione legittima conservata |
 | `data_agent/tests/test_charts.py` | grafici e tabelle: specifica JSON (serie, colori, date, NaN), errori comprensibili per l'LLM, PNG con matplotlib, limite di righe delle tabelle, istruzioni del pandas agent |
+| `data_agent/tests/test_validation.py` | controllo all'avvio: CSV valido, colonne mancanti (avvio bloccato), colonne in più, tipi e categorie sbagliati dopo la pulizia, `/health` |
+| `data_agent/tests/test_benchmark.py` | dataset ingranditi con le stesse anomalie, analisi del benchmark, report scritto |
 | `data_agent/tests/test_api.py` | API FastAPI: health, panoramica, caricamento e rimozione di un dataset, validazione di `/analyze` |
 
 ---
@@ -584,8 +595,10 @@ La knowledge base è composta dai **documenti ufficiali del club** (i file di `b
 - **Contesto per richiesta**: il system prompt include l'utente, l'archivio raggruppato per categoria, i **dati chiave** (scadenze e importi), i **dataset disponibili** con le loro colonne e l'eventuale documento o dataset aperto. Con un documento aperto il tool di ricerca espone il parametro `scope` (`documento_aperto` / `tutti`); con un dataset aperto l'analisi usa quel `dataset_id`.
 - **Memoria e cronologia**: ogni conversazione è salvata in `backend/storage/conversations/<userId>/<id>.json` con testo, grafici, fonti e passi dell'agente, scritta in modo atomico. Sopravvive al riavvio dei servizi. Dalla sidebar "Cronologia" (raggruppata per Oggi, Ieri, Ultimi 7 giorni) si può riaprire una chat passata e continuarla: all'LLM vengono ripassati gli ultimi `MAX_HISTORY_MESSAGES` messaggi. Il browser ricorda solo quale conversazione era aperta.
 - Ogni risposta include la `trace`, cioè i passi, gli argomenti, la durata, le fonti, il codice e il report di pulizia. Il flusso è quindi **verificabile**.
+- **Cache delle risposte** (`services/answerCacheService.js`): se la stessa domanda è il primo messaggio di una nuova conversazione e ha già una risposta valida, la risposta torna subito, senza chiamare OpenAI né il data agent, e in chat compare l'etichetta "Risposta dalla cache". La chiave combina la domanda normalizzata (maiuscole, spazi e punteggiatura finale non contano), il documento o dataset aperto, un'impronta dell'archivio (documenti e dataset visibili: se uno viene caricato, modificato o eliminato, le vecchie risposte non valgono più) e il modello. Dal secondo messaggio in poi la cache non si usa, perché la risposta dipende anche dalla cronologia ("E solo per i difensori?"). Non si salvano risposte vuote o con uno strumento fallito. Le voci scadono dopo `QUERY_CACHE_TTL_HOURS` ore e ne restano al massimo `QUERY_CACHE_MAX_ENTRIES` (si eliminano quelle usate meno di recente); sono salvate in `backend/storage/answer_cache.json`. Le risposte dalla cache non costano nulla, quindi passano anche oltre il tetto di spesa giornaliero.
 
 ### Pandas agent (data_agent)
+- **Validazione all'avvio** (`validation.py`): prima della pulizia controlla che il CSV delle partite abbia tutte le 40 colonne attese; dopo la pulizia controlla il tipo di ogni colonna (intero, decimale, data, testo), i valori ammessi di ruolo, competizione e casa/trasferta e le date. Se mancano colonne o la pulizia fallisce, il data agent **non parte** e scrive nel log cosa manca: meglio fermarsi che analizzare dati sbagliati. Tipi o categorie sbagliati e colonne in più vengono **segnalati** nel log, in `/api/health` (`dataValidation`) e con un avviso nella pagina Dati.
 - Agente ReAct con un solo strumento, `run_python`: l'LLM scrive codice, `executor.py` lo **esegue davvero** in un namespace persistente e l'output reale torna al modello. I numeri della risposta vengono quindi da calcoli effettivi e non da stime dell'LLM (interprete deterministico).
 - **Più dataset**: il dataset partite usa la **pipeline di cleaning dedicata** (`cleaning.py`); i file Excel/CSV caricati passano da una **pulizia generica** tracciata (`datasets.py`): nomi di colonna, righe e colonne vuote, duplicati, spazi, numeri salvati come testo in formato italiano (`€ 1.234,50`, `15%`), date. Lo **schema** di ogni file (tipi, range, esempi di valori) viene generato in automatico e passato all'LLM. Excel: primo foglio non vuoto; CSV: separatore e codifica rilevati automaticamente.
 - L'agente riceve `df` (pulito), `df_raw` (grezzo) e `cleaning_report`, e può applicare **pulizie aggiuntive specifiche per la domanda** (per le partite: escludere rating NaN, soglia minima di minuti, esclusione dei portieri).
@@ -604,6 +617,28 @@ La knowledge base è composta dai **documenti ufficiali del club** (i file di `b
 - **React Router** per le quattro aree. Lo stato della chat è in un **context condiviso**: pannello laterale e pagina Assistente mostrano la stessa conversazione, e il pulsante ⤢ cambia solo la vista.
 - Caricamento con **barra di avanzamento** (XMLHttpRequest) e **drag & drop**; lettore integrato per PDF (visualizzatore del browser, con salto alla pagina citata), Word (HTML), Markdown e TXT.
 - Tema "stadio": menu verde campo con le linee del terreno di gioco, pagine bianche, accento arancione. Layout responsive (menu a scomparsa e pannello AI a schermo intero su mobile).
+
+### Benchmark: quando servirà DuckDB
+
+`data_agent/benchmark.py` misura tempo e memoria di caricamento, pulizia e delle cinque analisi più frequenti (classifica marcatori, distanza per 90' per ruolo, wellness sotto soglia, incidenza infortuni, ACWR) su dataset di dimensioni crescenti, ottenuti replicando il CSV vero con le sue anomalie. Se DuckDB è installato (è tra i requisiti di sviluppo), esegue le stesse analisi anche in SQL.
+
+```bash
+cd data_agent
+.venv/bin/python benchmark.py                          # 1.578 → 250.000 righe
+.venv/bin/python benchmark.py --sizes 1578 1000000     # dimensioni a scelta
+```
+
+Il report completo è in [`data_agent/benchmark_results/results.md`](data_agent/benchmark_results/results.md). Risultati principali (MacBook con Apple Silicon, pandas 3.0):
+
+| Righe | Pulizia | Analisi più lenta (pandas) | Stessa analisi (DuckDB) | Picco di memoria all'avvio |
+|---:|---:|---:|---:|---:|
+| 1.578 (attuale) | 0,07 s | 0,004 s | 0,003 s | 4 MB |
+| 100.000 | 3,3 s | 0,04 s | 0,01 s | 222 MB |
+| 250.000 | 8,3 s | 0,11 s | 0,02 s | 554 MB |
+
+- **Tempo**: le analisi restano sotto il secondo anche con 250.000 righe (e con 1 milione in una prova separata). DuckDB è 5-10 volte più veloce, ma su questi tempi la differenza è irrilevante rispetto ai 2-5 secondi di ogni passo dell'LLM.
+- **Memoria**: è il vero limite. Il data agent tiene in memoria i dati grezzi e quelli puliti, e la pulizia ha un picco all'avvio. Sul piano gratuito di Render (512 MB per tutto il container) lo spazio per i dati si esaurisce tra 100.000 e 250.000 righe.
+- **Decisione**: con i dati attuali pandas basta. Oltre circa 100.000 righe conviene salvare i dati già puliti in DuckDB o Parquet e far scrivere all'agente query SQL, invece di tenere grezzo e pulito in memoria. SQLite servirebbe solo con scritture frequenti e concorrenti, che qui non ci sono.
 
 ---
 
