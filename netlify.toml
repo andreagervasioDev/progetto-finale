@@ -1,0 +1,9 @@
+# Netlify pubblica solo il frontend React; le API vanno al servizio Render (vedi frontend/public/_redirects)
+[build]
+  base = "frontend"
+  command = "npm ci && npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Vite 8 richiede Node 20.19 o superiore
+  NODE_VERSION = "22"

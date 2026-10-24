@@ -132,6 +132,7 @@ progetto-finale/
 ├── README.md
 ├── Dockerfile, .dockerignore    # immagine unica per il deploy online
 ├── render.yaml                  # Blueprint Render (vedi "Deploy online")
+├── netlify.toml                 # build del frontend su Netlify
 ├── deploy/start.sh              # avvio dei tre servizi nel container
 │
 ├── presentazione/
@@ -465,7 +466,7 @@ Il piano gratuito non ha un disco permanente: utenti, conversazioni e documenti 
 
 Su Render: **New → Blueprint**, scegli il repository e inserisci `OPENAI_API_KEY`, `DEFAULT_ADMIN_PASSWORD` e `DEFAULT_TEST_PASSWORD` (non usare `admin` e `test` su un sito pubblico). L'app è all'indirizzo del servizio: la demo di questo progetto è su **https://management-ai-r5nl.onrender.com**. Rinominare il servizio su Render non cambia l'indirizzo.
 
-Se il frontend è pubblicato anche su **Netlify**, `frontend/public/_redirects` inoltra `/api/*` al servizio Render: controlla che l'indirizzo nel file sia quello del tuo servizio. Il proxy di Netlify chiude le richieste che non iniziano a rispondere entro 26 secondi: la chat non ne risente, perché lo streaming parte subito, mentre il caricamento di un PDF molto lungo può fallire. In quel caso usa direttamente l'indirizzo Render.
+Il frontend è pubblicato anche su **Netlify** (https://progetto-management-ai.netlify.app): `netlify.toml` dice a Netlify di compilare la cartella `frontend/` e pubblicare `frontend/dist`, e `frontend/public/_redirects` inoltra `/api/*` al servizio Render: controlla che l'indirizzo nel file sia quello del tuo servizio. Il proxy di Netlify chiude le richieste che non iniziano a rispondere entro 26 secondi: la chat non ne risente, perché lo streaming parte subito, mentre il caricamento di un PDF molto lungo può fallire. In quel caso usa direttamente l'indirizzo Render.
 
 ---
 
