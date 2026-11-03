@@ -492,9 +492,9 @@ Per la correzione basta l'avvio in locale. Per una demo online il repository con
 - `deploy/start.sh`: avvia i tre processi e mette dati, indice e grafici nella cartella `/data`;
 - `render.yaml`: servizio web sul **piano gratuito**, cookie `Secure`, tetto di spesa di 1 dollaro al giorno.
 
-Il piano gratuito non ha un disco permanente: utenti, conversazioni e documenti caricati si azzerano a ogni riavvio e a ogni deploy (anche a ogni `git push`), mentre i documenti ufficiali e il dataset delle partite si ricaricano dal repository. Dopo 15 minuti senza visite il servizio si spegne e la visita successiva aspetta circa un minuto: per tenerlo acceso basta un controllo esterno ogni 5-10 minuti su `/api/health`, per esempio con UptimeRobot. Per conservare i dati serve un piano a pagamento con un disco montato in `/data`.
+Il piano gratuito non ha un disco permanente: utenti, conversazioni e documenti caricati si azzerano a ogni riavvio e a ogni deploy (anche a ogni `git push`), mentre i documenti ufficiali e il dataset delle partite si ricaricano dal repository. Dopo 15 minuti senza visite il servizio si spegne e la visita successiva aspetta circa un minuto: per tenerlo acceso basta un controllo esterno ogni 5-10 minuti su `/api/health/live`, per esempio con UptimeRobot. Per conservare i dati serve un piano a pagamento con un disco montato in `/data`.
 
-Su Render: **New → Blueprint**, scegli il repository e inserisci `OPENAI_API_KEY`, `DEFAULT_ADMIN_PASSWORD` e `DEFAULT_TEST_PASSWORD` (non usare `admin` e `test` su un sito pubblico). Il deploy parte da solo dopo ogni `git push`, ma solo quando i test di GitHub Actions sono passati (vedi [Test](#9-test)). L'app è all'indirizzo del servizio: la demo di questo progetto è su **https://management-ai-r5nl.onrender.com**. Rinominare il servizio su Render non cambia l'indirizzo.
+Su Render: **New → Blueprint**, scegli il repository e inserisci `OPENAI_API_KEY`, `DEFAULT_ADMIN_PASSWORD` e `DEFAULT_TEST_PASSWORD` (non usare `admin` e `test` su un sito pubblico). Il deploy parte da solo dopo ogni `git push`, ma solo quando i test di GitHub Actions sono passati (vedi [Test](#9-test)). Render considera pronta l'istanza quando `/api/health/live` risponde entro 5 secondi, e annulla il deploy se non succede entro 15 minuti. Il controllo non usa `/api/health` di proposito: quell'endpoint interroga ChromaDB e il data agent, che all'avvio, con lo 0,1 di CPU del piano gratuito, sono occupati a indicizzare tutti i documenti, e può superare i 5 secondi. L'app è all'indirizzo del servizio: la demo di questo progetto è su **https://management-ai-r5nl.onrender.com**. Rinominare il servizio su Render non cambia l'indirizzo.
 
 Il frontend è pubblicato anche su **Netlify** (https://progetto-management-ai.netlify.app): `netlify.toml` dice a Netlify di compilare la cartella `frontend/` e pubblicare `frontend/dist`, e `frontend/public/_redirects` inoltra `/api/*` al servizio Render: controlla che l'indirizzo nel file sia quello del tuo servizio. Il proxy di Netlify chiude le richieste che non iniziano a rispondere entro 26 secondi: la chat non ne risente, perché lo streaming parte subito, mentre il caricamento di un PDF molto lungo può fallire. In quel caso usa direttamente l'indirizzo Render.
 
@@ -544,6 +544,7 @@ Partono a ogni push e pull request, su qualunque branch; un nuovo push sullo ste
 | `backend/tests/fileCheck.test.js` | controllo del contenuto dei file caricati: firma del formato (eseguibile rinominato `.pdf`, binario rinominato `.csv`), zip bomb (dimensione, rapporto di compressione, numero di elementi), archivi danneggiati |
 | `backend/tests/http.test.js` (limite upload) | caricamento con `Content-Length` oltre 20 MB → 413 senza leggere il corpo; corpo a blocchi senza `Content-Length` → connessione chiusa poco oltre la soglia e nessun file parziale |
 | `backend/tests/repositories.test.js` | scritture contemporanee: due `appendTurn` in parallelo sulla stessa conversazione (e 20 insieme) senza turni persi, rinomina ed eliminazione insieme a un nuovo turno, accessi in parallelo su `users.json`, nessun file temporaneo rimasto; coda del lock (stessa chiave in fila, chiavi diverse in parallelo, un errore non blocca la coda) |
+| `backend/tests/health.test.js` | controlli di salute con ChromaDB e data agent bloccati: `/api/health/live` risponde subito, `/api/health` li segnala come offline entro i 5 secondi di Render |
 | `backend/tests/cancel.test.js` | annullamento della chat con finti server OpenAI e data agent: turno normale completato e salvato; client che chiude durante il data agent o durante OpenAI (stream e JSON) → chiamata in corso chiusa, nessun passo successivo, turno non salvato; OpenAI che non risponde → errore dopo `OPENAI_TIMEOUT_MS` |
 | `backend/tests/sanitize.test.js` | pulizia dell'HTML dei file Word: rimozione di script, gestori di eventi, iframe, link `javascript:` e immagini `data:text/html`; formattazione legittima conservata |
 | `data_agent/tests/test_charts.py` | grafici e tabelle: specifica JSON (serie, colori, date, NaN), errori comprensibili per l'LLM, PNG con matplotlib, limite di righe delle tabelle, istruzioni del pandas agent |
@@ -733,6 +734,7 @@ Il report completo è in [`data_agent/benchmark_results/results.md`](data_agent/
 | `GET` | `/api/datasets` | Dataset analizzabili (partite + file Excel/CSV dell'archivio) |
 | `GET` | `/api/datasets/:id/overview` | Schema, pulizia, valori mancanti e anteprima righe di un dataset |
 | `GET` | `/api/health` | Stato di backend, Chroma, data agent e chiave OpenAI (pubblico) |
+| `GET` | `/api/health/live` | Risponde subito `{"status":"ok"}` senza interrogare Chroma e data agent: è il controllo di salute di Render (pubblico) |
 | `POST` | `/api/auth/login` | `{ username, password }` → cookie di sessione + profilo (pubblico) |
 | `POST` | `/api/auth/logout` | Chiude la sessione |
 | `GET` | `/api/me` | Utente collegato (401 senza sessione) |
@@ -743,7 +745,7 @@ Il report completo è in [`data_agent/benchmark_results/results.md`](data_agent/
 | `GET` | `/api/admin/conversations` | **Admin**: conversazioni di tutti gli utenti (`?userId`) |
 | `GET` | `/api/admin/conversations/:userId/:id` | **Admin**: una conversazione completa |
 
-Tutte le API tranne `/api/health` e `/api/auth/*` richiedono il cookie di sessione (altrimenti `401`); quelle `/api/admin/*` rispondono `403` agli utenti non amministratori.
+Tutte le API tranne `/api/health`, `/api/health/live` e `/api/auth/*` richiedono il cookie di sessione (altrimenti `401`); quelle `/api/admin/*` rispondono `403` agli utenti non amministratori.
 
 Esempio:
 ```bash

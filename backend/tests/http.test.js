@@ -44,6 +44,7 @@ describe("login e sessione", () => {
       assert.equal((await fetch(base + path)).status, 401, path);
     }
     assert.equal((await fetch(`${base}/api/health`)).status, 200);
+    assert.equal((await fetch(`${base}/api/health/live`)).status, 200);
   });
 
   test("credenziali errate → 401, senza cookie", async () => {

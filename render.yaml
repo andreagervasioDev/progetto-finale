@@ -11,7 +11,9 @@ services:
     # Dopo 15 minuti senza visite il servizio si spegne (un ping esterno, es. UptimeRobot, lo tiene sveglio).
     plan: free
     region: frankfurt
-    healthCheckPath: /api/health
+    # controllo leggero, senza ChromaDB e data agent: all'avvio sono occupati a indicizzare i documenti e
+    # /api/health potrebbe superare i 5 secondi concessi da Render (deploy annullato dopo 15 minuti)
+    healthCheckPath: /api/health/live
     # deploy solo se i controlli di GitHub Actions (.github/workflows/ci.yml) sono tutti verdi:
     # un commit che rompe i test o introduce una vulnerabilità nota non viene pubblicato
     autoDeployTrigger: checksPass
