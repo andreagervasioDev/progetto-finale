@@ -11,5 +11,6 @@ frontend/dist
 backend/storage
 backend/chroma_data
 data_agent/datasets
+data_agent/cache
 data_agent/charts/*.png
 presentazione

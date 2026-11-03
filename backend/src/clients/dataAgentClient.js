@@ -21,13 +21,18 @@ async function check(res) {
   throw err;
 }
 
-/** Analisi in linguaggio naturale su un dataset: risposta, grafici, codice eseguito e report di pulizia. */
-export async function analyzeData({ question, context, datasetId }) {
+/**
+ * Analisi in linguaggio naturale su un dataset: risposta, grafici, codice eseguito e report di pulizia.
+ * `signal` è quello della richiesta di chat: se l'utente se ne va, la chiamata si chiude e il data agent
+ * interrompe a sua volta l'analisi.
+ */
+export async function analyzeData({ question, context, datasetId, signal }) {
+  const timeout = AbortSignal.timeout(config.dataAgentTimeoutMs);
   const res = await fetch(url("/analyze"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question, context, dataset_id: datasetId }),
-    signal: AbortSignal.timeout(config.dataAgentTimeoutMs),
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   });
   if (!res.ok) {
     const detail = await res.text();

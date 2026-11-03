@@ -4,8 +4,11 @@
  */
 import "./env.js";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import http from "node:http";
 import { after, before, describe, test } from "node:test";
 import { createApp } from "../src/app.js";
+import { UPLOAD_DIR } from "../src/documents/uploadStorage.js";
 
 let server;
 let base;
@@ -157,6 +160,60 @@ describe("documenti", () => {
       assert.match((await res.json()).error, /non corrisponde a un PDF/);
     }
     assert.deepEqual(await (await get("/api/documents")).json(), []); // nessun documento salvato
+  });
+});
+
+/**
+ * Caricamento "a mano" con http.request: permette di dichiarare un Content-Length diverso dal corpo
+ * o di mandare il corpo a blocchi senza dichiararlo. Restituisce stato, risposta e byte inviati.
+ */
+function rawUpload({ declaredLength, chunks }) {
+  const boundary = "----limite";
+  const head = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="grande.csv"\r\nContent-Type: text/csv\r\n\r\n`,
+  );
+  const headers = { Cookie: testCookie, "Content-Type": `multipart/form-data; boundary=${boundary}` };
+  if (declaredLength) headers["Content-Length"] = declaredLength;
+  return new Promise((resolve, reject) => {
+    let sent = 0;
+    const req = http.request(`${base}/api/documents`, { method: "POST", headers }, (res) => {
+      const sentAtResponse = sent;
+      let body = "";
+      res.on("data", (d) => (body += d));
+      res.on("end", () => resolve({ status: res.statusCode, body: JSON.parse(body), sent: sentAtResponse }));
+    });
+    // il server può chiudere la connessione mentre stiamo ancora scrivendo
+    req.on("error", (err) => resolve({ status: null, error: err.code, sent }));
+    req.write(head);
+    const writeNext = (i) => {
+      if (i >= chunks || req.destroyed || req.writableEnded) return req.end();
+      sent += 1024 * 1024;
+      if (req.write(Buffer.alloc(1024 * 1024, "a"))) setImmediate(() => writeNext(i + 1));
+      else req.once("drain", () => writeNext(i + 1));
+    };
+    if (declaredLength) req.end(Buffer.alloc(10, "a"));
+    else writeNext(0);
+    setTimeout(() => reject(new Error("nessuna risposta")), 20000).unref();
+  });
+}
+
+describe("limite di dimensione dei caricamenti", () => {
+  const tempFiles = () => fs.readdirSync(UPLOAD_DIR).length;
+
+  test("Content-Length oltre 20 MB → 413 subito, senza leggere il corpo", async () => {
+    const res = await rawUpload({ declaredLength: 25 * 1024 * 1024 });
+    assert.equal(res.status, 413);
+    assert.equal(res.body.error, "File troppo grande (massimo 20 MB).");
+  });
+
+  test("corpo a blocchi senza Content-Length → connessione chiusa poco oltre 20 MB, nessun file parziale", async () => {
+    const before = tempFiles();
+    const res = await rawUpload({ chunks: 60 });
+    assert.equal(res.status, null); // nessuna risposta: il server ha chiuso la connessione
+    assert.ok(res.sent < 40 * 1024 * 1024, `inviati ${res.sent / 1024 / 1024} MB su 60`);
+    for (let i = 0; i < 50 && tempFiles() !== before; i++) await new Promise((r) => setTimeout(r, 100));
+    assert.equal(tempFiles(), before); // il file parziale è stato chiuso e cancellato
+    assert.deepEqual(await (await get("/api/documents")).json(), []);
   });
 });
 

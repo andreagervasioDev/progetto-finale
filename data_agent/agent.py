@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -22,9 +23,17 @@ from charts import make_helpers
 from datasets import Dataset, DatasetStore
 from executor import PythonExecutor
 
-CHARTS_DIR = Path(__file__).parent / "charts"
+# PNG dei grafici; nei test viene usata una cartella temporanea (CHARTS_DIR)
+CHARTS_DIR = Path(os.getenv("CHARTS_DIR", Path(__file__).parent / "charts"))
 CHARTS_DIR.mkdir(exist_ok=True)
 MAX_STEPS = int(os.getenv("DATA_AGENT_MAX_STEPS", "8"))
+# stesse variabili del backend: tempo massimo di ogni chiamata a OpenAI e tentativi in piu'
+OPENAI_TIMEOUT_S = float(os.getenv("OPENAI_TIMEOUT_MS", "60000")) / 1000
+OPENAI_MAX_RETRIES = int(os.getenv("OPENAI_MAX_RETRIES", "1"))
+
+
+class AnalysisCancelled(Exception):
+    """Il backend ha chiuso la richiesta (l'utente ha annullato): l'analisi si ferma al passo successivo."""
 
 
 SCHEMA_DESCRIPTION = """
@@ -113,11 +122,17 @@ TOOLS = [{
 }]
 
 
+def data_agent_model() -> str:
+    """Modello del pandas agent: DATA_AGENT_MODEL, altrimenti lo stesso dell'orchestratore."""
+    return os.getenv("DATA_AGENT_MODEL") or os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+
+
 class PandasAgent:
     def __init__(self, store: DatasetStore):
         self.store = store
-        self.client = OpenAI()  # legge OPENAI_API_KEY dalle variabili d'ambiente
-        self.model = os.getenv("DATA_AGENT_MODEL") or os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+        # legge OPENAI_API_KEY dalle variabili d'ambiente; senza timeout l'SDK aspetterebbe fino a 10 minuti
+        self.client = OpenAI(timeout=OPENAI_TIMEOUT_S, max_retries=OPENAI_MAX_RETRIES)
+        self.model = data_agent_model()
 
     def _new_namespace(self, ds: Dataset, charts: list[dict], tables: list[dict]) -> dict:
         # i grafici si creano solo con chart(): JSON per il frontend React + PNG con matplotlib (charts.py)
@@ -131,7 +146,14 @@ class PandasAgent:
             "table": table,
         }
 
-    def analyze(self, question: str, context: str | None, ds: Dataset) -> dict:
+    def analyze(self, question: str, context: str | None, ds: Dataset, cancel: threading.Event | None = None) -> dict:
+        """`cancel` viene impostato da app.py quando il backend chiude la richiesta: prima di ogni chiamata
+        a OpenAI e di ogni blocco di codice si controlla, cosi' l'analisi non prosegue per nessuno."""
+
+        def check_cancelled():
+            if cancel is not None and cancel.is_set():
+                raise AnalysisCancelled
+
         charts: list[dict] = []
         tables: list[dict] = []
         executor = PythonExecutor(self._new_namespace(ds, charts, tables))
@@ -142,6 +164,7 @@ class PandasAgent:
         messages = [{"role": "system", "content": build_system_prompt(ds)}, {"role": "user", "content": user_msg}]
 
         for _ in range(MAX_STEPS):
+            check_cancelled()
             resp = self.client.chat.completions.create(
                 model=self.model, messages=messages, tools=TOOLS, temperature=0)
             _add_usage(usage, resp, self.model)
@@ -157,11 +180,13 @@ class PandasAgent:
                 except json.JSONDecodeError:
                     args = {"code": "", "thought": ""}
                 code = args.get("code", "")
+                check_cancelled()
                 output = executor.run(code)
                 steps.append({"thought": args.get("thought", ""), "code": code, "output": output[:1500]})
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": output})
 
         # troppi passi: chiedo una sintesi con quello che e' stato calcolato finora
+        check_cancelled()
         messages.append({"role": "user", "content": "Hai raggiunto il numero massimo di passi. "
                                                     "Scrivi ora la risposta finale con i risultati ottenuti."})
         resp = self.client.chat.completions.create(model=self.model, messages=messages, temperature=0)

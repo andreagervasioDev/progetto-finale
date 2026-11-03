@@ -7,6 +7,8 @@
  *   - delegare un'analisi numerica al data agent Python
  *   - combinare i due strumenti (es. prima recupera una soglia dal protocollo, poi la applica ai dati)
  * Il ciclo continua finché il modello non produce la risposta finale.
+ * Con ctx.signal (la connessione del client) il ciclo si interrompe appena l'utente annulla la richiesta:
+ * la chiamata in corso a OpenAI o al data agent viene chiusa e non parte il passo successivo.
  */
 import { getOpenAI } from "../clients/openaiClient.js";
 import { config } from "../config.js";
@@ -30,10 +32,11 @@ const TOOL_ERRORS = {
  * @param {Array} history  messaggi precedenti della sessione [{role, content}]
  * @param {string} userMessage
  * @param {(event: object) => void} onEvent  callback per aggiornare il client sullo stato (streaming)
- * @param {{userId: string, user?: object, document?: object, dataset?: object, documents?: object[], datasets?: object[]}} ctx
+ * @param {{userId: string, user?: object, document?: object, dataset?: object, documents?: object[], datasets?: object[], signal?: AbortSignal}} ctx
  */
 export async function runAgent(history, userMessage, onEvent = () => {}, ctx = {}) {
   const openai = getOpenAI();
+  const { signal } = ctx;
   const tools = toolDefinitionsFor(ctx);
   const messages = [{ role: "system", content: buildSystemPrompt(ctx) }, ...history, { role: "user", content: userMessage }];
 
@@ -43,6 +46,7 @@ export async function runAgent(history, userMessage, onEvent = () => {}, ctx = {
   const tables = []; // tabelle JSON create dal data agent
 
   for (let step = 1; step <= config.maxAgentSteps; step++) {
+    signal?.throwIfAborted();
     onEvent({ type: "status", stage: "thinking", label: step === 1 ? "Analizzo la richiesta" : "Valuto i risultati" });
 
     const completion = await openai.chat.completions.create({
@@ -52,7 +56,7 @@ export async function runAgent(history, userMessage, onEvent = () => {}, ctx = {
       tool_choice: "auto",
       parallel_tool_calls: true,
       temperature: 0.2,
-    });
+    }, { signal });
     recordUsage({ kind: "chat", model: completion.model ?? config.chatModel, usage: completion.usage });
     const msg = completion.choices[0].message;
     messages.push(msg);
@@ -85,11 +89,14 @@ export async function runAgent(history, userMessage, onEvent = () => {}, ctx = {
             sources: out.sources,
             code: out.code,
             cleaning: out.cleaning,
+            ...(out.cached && { cached: true }),
             // nei passi bastano titolo e file: i dati del grafico sono già nel messaggio
             charts: out.charts?.map(({ spec: _spec, ...chart }) => chart),
           });
           return { call, content: out.content, entry };
         } catch (err) {
+          // richiesta annullata: non è un errore dello strumento, il turno si ferma qui
+          if (signal?.aborted) throw signal.reason;
           // il dettaglio tecnico (indirizzi interni, eccezioni Python...) resta nei log del server; nei passi
           // salvati nella chat e mostrati all'utente, e nel testo per il modello, va solo un messaggio chiaro
           logError(`[agente] strumento ${name} non riuscito:`, err);
@@ -100,6 +107,7 @@ export async function runAgent(history, userMessage, onEvent = () => {}, ctx = {
       }),
     );
 
+    signal?.throwIfAborted();
     // Observe: i risultati tornano al modello come messaggi "tool"
     for (const { call, content, entry } of results) {
       trace.push(entry);
@@ -109,9 +117,10 @@ export async function runAgent(history, userMessage, onEvent = () => {}, ctx = {
   }
 
   // limite di passi raggiunto: chiede comunque una risposta con quanto raccolto
+  signal?.throwIfAborted();
   onEvent({ type: "status", stage: "thinking", label: "Preparo la risposta" });
   messages.push({ role: "user", content: "Rispondi ora con le informazioni raccolte, senza usare altri strumenti." });
-  const final = await openai.chat.completions.create({ model: config.chatModel, messages, temperature: 0.2 });
+  const final = await openai.chat.completions.create({ model: config.chatModel, messages, temperature: 0.2 }, { signal });
   recordUsage({ kind: "chat", model: final.model ?? config.chatModel, usage: final.usage });
   return { reply: final.choices[0].message.content ?? "", trace, sources: dedupeSources(sources), charts, tables };
 }

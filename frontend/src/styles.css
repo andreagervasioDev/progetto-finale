@@ -726,6 +726,11 @@ pre.output {
   color: var(--text-2);
 }
 
+.data-chart figcaption .png-gone {
+  color: var(--text-3);
+  text-align: right;
+}
+
 .data-chart figcaption a {
   display: inline-flex;
   align-items: center;

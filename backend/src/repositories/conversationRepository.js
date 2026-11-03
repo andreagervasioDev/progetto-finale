@@ -5,11 +5,15 @@
  * con tutti i messaggi (testo, grafici, fonti e passi dell'agente). In questo modo:
  *   - la cronologia sopravvive al riavvio del backend;
  *   - ogni utente vede e riprende solo le proprie conversazioni.
+ * Le modifiche alla stessa conversazione (nuovo turno, rinomina, eliminazione) passano da un lock per
+ * conversazione: due richieste insieme, per esempio dal pannello laterale e dalla pagina Assistente,
+ * vengono eseguite una dopo l'altra e nessuna cancella i messaggi dell'altra.
  */
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
+import { withLock, writeJsonAtomic } from "./jsonFile.js";
 
 const ROOT = path.join(config.storageDir, "conversations");
 const ID_RE = /^[a-zA-Z0-9-]{8,64}$/;
@@ -31,17 +35,16 @@ function makeTitle(text) {
   return clean.length > 60 ? clean.slice(0, 57).trimEnd() + "…" : clean;
 }
 
+const lockKey = (userId, id) => `${userId}/${id}`;
+
 async function save(userId, conv) {
-  cache.set(`${userId}/${conv.id}`, conv);
-  const file = path.join(await userDir(userId), `${conv.id}.json`);
-  // scrittura atomica: file temporaneo + rename, così un crash non corrompe la conversazione
-  await fs.writeFile(file + ".tmp", JSON.stringify(conv, null, 2));
-  await fs.rename(file + ".tmp", file);
+  cache.set(lockKey(userId, conv.id), conv);
+  await writeJsonAtomic(path.join(await userDir(userId), `${conv.id}.json`), conv, 2);
 }
 
 export async function getConversation(userId, id) {
   if (!isValidId(id)) return null;
-  const key = `${userId}/${id}`;
+  const key = lockKey(userId, id);
   if (cache.has(key)) return cache.get(key);
   try {
     const conv = JSON.parse(await fs.readFile(path.join(await userDir(userId), `${id}.json`), "utf8"));
@@ -60,15 +63,18 @@ export async function getHistory(userId, id) {
 }
 
 /** Salva un turno completo (domanda + risposta) creando la conversazione se non esiste. */
-export async function appendTurn(userId, id, userText, assistant, userExtra = {}) {
-  const now = Date.now();
-  const conv = (await getConversation(userId, id)) ?? { id, title: makeTitle(userText), createdAt: now, messages: [] };
-  const userMsg = { id: randomUUID(), role: "user", content: userText, createdAt: now, ...userExtra };
-  const assistantMsg = { id: randomUUID(), role: "assistant", createdAt: Date.now(), ...assistant };
-  conv.messages.push(userMsg, assistantMsg);
-  conv.updatedAt = Date.now();
-  await save(userId, conv);
-  return { conversation: conv, userMsg, assistantMsg };
+export function appendTurn(userId, id, userText, assistant, userExtra = {}) {
+  // lettura, aggiunta e scrittura sotto lo stesso lock: un turno in parallelo aspetta e si aggiunge dopo
+  return withLock(lockKey(userId, id), async () => {
+    const now = Date.now();
+    const conv = (await getConversation(userId, id)) ?? { id, title: makeTitle(userText), createdAt: now, messages: [] };
+    const userMsg = { id: randomUUID(), role: "user", content: userText, createdAt: now, ...userExtra };
+    const assistantMsg = { id: randomUUID(), role: "assistant", createdAt: Date.now(), ...assistant };
+    conv.messages.push(userMsg, assistantMsg);
+    conv.updatedAt = Date.now();
+    await save(userId, conv);
+    return { conversation: conv, userMsg, assistantMsg };
+  });
 }
 
 export async function listConversations(userId) {
@@ -86,23 +92,27 @@ export async function listConversations(userId) {
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-export async function renameConversation(userId, id, title) {
-  const conv = await getConversation(userId, id);
-  if (!conv) return null;
-  conv.title = makeTitle(title);
-  await save(userId, conv);
-  return conv;
+export function renameConversation(userId, id, title) {
+  return withLock(lockKey(userId, id), async () => {
+    const conv = await getConversation(userId, id);
+    if (!conv) return null;
+    conv.title = makeTitle(title);
+    await save(userId, conv);
+    return conv;
+  });
 }
 
 export async function deleteConversation(userId, id) {
   if (!isValidId(id)) return false;
-  cache.delete(`${userId}/${id}`);
-  try {
-    await fs.unlink(path.join(await userDir(userId), `${id}.json`));
-    return true;
-  } catch {
-    return false;
-  }
+  return withLock(lockKey(userId, id), async () => {
+    cache.delete(lockKey(userId, id));
+    try {
+      await fs.unlink(path.join(await userDir(userId), `${id}.json`));
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /** Conversazioni salvate senza utente (versioni precedenti, file nella radice): passano al profilo. */

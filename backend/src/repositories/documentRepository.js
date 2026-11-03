@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
+import { withLock, writeJsonAtomic } from "./jsonFile.js";
 
 const META_FILE = path.join(config.storageDir, "documents.json");
 export const FILES_DIR = path.join(config.storageDir, "files");
@@ -18,21 +19,23 @@ export const SYSTEM_OWNER = "system";
 await fs.mkdir(FILES_DIR, { recursive: true });
 
 let docs = null;
+let loading = null; // primo caricamento condiviso dalle richieste contemporanee
 
-async function load() {
-  if (docs) return docs;
-  try {
-    docs = JSON.parse(await fs.readFile(META_FILE, "utf8"));
-  } catch {
-    docs = [];
-  }
-  return docs;
+function load() {
+  if (docs) return Promise.resolve(docs);
+  loading ??= fs
+    .readFile(META_FILE, "utf8")
+    .then(JSON.parse)
+    .catch(() => [])
+    .then((loaded) => (docs = loaded))
+    .finally(() => {
+      loading = null;
+    });
+  return loading;
 }
 
-async function persist() {
-  await fs.writeFile(META_FILE + ".tmp", JSON.stringify(docs, null, 2));
-  await fs.rename(META_FILE + ".tmp", META_FILE);
-}
+// scritture in fila: ognuna salva lo stato più recente, nessuna si sovrappone a un'altra
+const persist = () => withLock(META_FILE, () => writeJsonAtomic(META_FILE, docs, 2));
 
 export const filePathOf = (doc) => path.join(FILES_DIR, `${doc.id}${doc.ext}`);
 

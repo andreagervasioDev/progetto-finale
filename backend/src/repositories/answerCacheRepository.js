@@ -6,27 +6,30 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
+import { withLock, writeJsonAtomic } from "./jsonFile.js";
 
 const FILE = path.join(config.storageDir, "answer_cache.json");
 
 await fs.mkdir(path.dirname(FILE), { recursive: true });
 
 let entries = null; // cache in memoria: { [key]: { answer, createdAt, lastHitAt, hits } }
+let loading = null; // primo caricamento condiviso dalle richieste contemporanee
 
-async function load() {
-  if (entries) return entries;
-  try {
-    entries = JSON.parse(await fs.readFile(FILE, "utf8"));
-  } catch {
-    entries = {};
-  }
-  return entries;
+function load() {
+  if (entries) return Promise.resolve(entries);
+  loading ??= fs
+    .readFile(FILE, "utf8")
+    .then(JSON.parse)
+    .catch(() => ({}))
+    .then((loaded) => (entries = loaded))
+    .finally(() => {
+      loading = null;
+    });
+  return loading;
 }
 
-async function save() {
-  await fs.writeFile(FILE + ".tmp", JSON.stringify(entries));
-  await fs.rename(FILE + ".tmp", FILE);
-}
+// scritture in fila: ognuna salva lo stato più recente, nessuna si sovrappone a un'altra
+const save = () => withLock(FILE, () => writeJsonAtomic(FILE, entries));
 
 export async function getEntry(key) {
   return (await load())[key] ?? null;

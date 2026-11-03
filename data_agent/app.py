@@ -14,16 +14,19 @@ Endpoint:
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 import os
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -31,9 +34,12 @@ from pydantic import BaseModel, Field
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR.parent / ".env")  # .env unico nella root del progetto
 
-from agent import CHARTS_DIR, SCHEMA_DESCRIPTION, PandasAgent  # noqa: E402
+from agent import CHARTS_DIR, SCHEMA_DESCRIPTION, AnalysisCancelled, PandasAgent, data_agent_model  # noqa: E402
+from analysis_cache import AnalysisCache, cache_key  # noqa: E402
 from cleaning import quality_summary  # noqa: E402
 from datasets import BUILTIN_ID, Dataset, DatasetError, DatasetStore  # noqa: E402
+from retention import RetentionPolicy, charts_status, retention_loop  # noqa: E402
+from upload_limit import BodySizeLimitMiddleware, read_limited  # noqa: E402
 from validation import SchemaError  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [data_agent] %(message)s")
@@ -41,6 +47,9 @@ log = logging.getLogger(__name__)
 
 DATASET_PATH = Path(os.getenv("DATASET_PATH", BASE_DIR / "data" / "player_performance.csv"))
 MAX_UPLOAD_MB = 20
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+RETENTION = RetentionPolicy.from_env()
+ANALYSIS_CACHE = AnalysisCache.from_env()
 state: dict = {}
 
 
@@ -68,11 +77,18 @@ async def lifespan(_: FastAPI):
         log.warning("OPENAI_API_KEY non impostata: /analyze non funzionera'. Controlla il file .env")
     else:
         state["agent"] = PandasAgent(store)
+    # retention dei PNG dei grafici: pulizia subito e poi a intervalli regolari
+    cleanup = asyncio.create_task(retention_loop(CHARTS_DIR, RETENTION))
     yield
+    cleanup.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await cleanup
 
 
 app = FastAPI(title="Management AI - Data Agent", version="2.0.0", lifespan=lifespan)
 app.mount("/charts", StaticFiles(directory=CHARTS_DIR), name="charts")
+# caricamento dei dataset: la lettura si interrompe appena il corpo supera il limite (413)
+app.add_middleware(BodySizeLimitMiddleware, max_bytes=MAX_UPLOAD_BYTES, paths=("/datasets",))
 
 
 def _store() -> DatasetStore:
@@ -132,6 +148,8 @@ def health():
         "datasets": len(_store().list()),
         "llm_ready": "agent" in state,
         "validation": builtin.validation.to_dict(),
+        "charts": charts_status(CHARTS_DIR, RETENTION),
+        "analysis_cache": ANALYSIS_CACHE.status(),
     }
 
 
@@ -142,9 +160,8 @@ def list_datasets():
 
 @app.post("/datasets", status_code=201)
 async def add_dataset(id: str = Form(...), title: str = Form(...), file: UploadFile = File(...)):
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_MB * 1024 * 1024:
-        raise HTTPException(413, f"File troppo grande (massimo {MAX_UPLOAD_MB} MB).")
+    # lettura a blocchi: oltre il limite si ferma senza caricare il resto in memoria
+    content = await read_limited(file, MAX_UPLOAD_BYTES)
     try:
         ds = await run_in_threadpool(_store().add, id, title, file.filename or "dati.csv", content)
     except DatasetError as e:
@@ -201,24 +218,52 @@ def dataset_preview(rows: int = 50):
     return dataset_overview(BUILTIN_ID, rows)
 
 
+DISCONNECT_POLL_S = 0.5
+
+
+async def watch_disconnect(request: Request, cancel: threading.Event) -> None:
+    """Imposta `cancel` appena il backend chiude la connessione (l'utente ha annullato la domanda)."""
+    while not await request.is_disconnected():
+        await asyncio.sleep(DISCONNECT_POLL_S)
+    cancel.set()
+
+
 @app.post("/analyze")
-async def analyze(req: AnalyzeRequest):
-    agent: PandasAgent | None = state.get("agent")
-    if agent is None:
-        raise HTTPException(503, "Data agent non configurato: manca OPENAI_API_KEY")
+async def analyze(req: AnalyzeRequest, request: Request):
     ds = _get(req.dataset_id)
     t0 = time.time()
     log.info("Domanda su '%s': %s", ds.title, req.question)
+
+    # stessa domanda, stesso contesto, stessi dati e stesso modello: riuso l'analisi gia' fatta
+    key = cache_key(req.question, req.context, ds.id, ds.version, data_agent_model())
+    cached = await run_in_threadpool(ANALYSIS_CACHE.get, key, CHARTS_DIR)
+    if cached is not None:
+        log.info("Analisi dalla cache (%s passi, %s grafici)", len(cached["steps"]), len(cached["charts"]))
+        # nessun token consumato: il backend non deve contare di nuovo la spesa
+        return cached | {"usage": [], "cached": True, "elapsed_s": round(time.time() - t0, 1)}
+
+    agent: PandasAgent | None = state.get("agent")
+    if agent is None:
+        raise HTTPException(503, "Data agent non configurato: manca OPENAI_API_KEY")
+    cancel = threading.Event()
+    watcher = asyncio.create_task(watch_disconnect(request, cancel))
     try:
         # l'agente e' sincrono (OpenAI + exec): lo eseguo in un thread per non bloccare il server
-        result = await run_in_threadpool(agent.analyze, req.question, req.context, ds)
+        result = await run_in_threadpool(agent.analyze, req.question, req.context, ds, cancel)
+    except AnalysisCancelled:
+        # nessuno leggera' la risposta: niente cache e nessun errore da registrare
+        log.info("Analisi interrotta: il backend ha chiuso la richiesta")
+        return Response(status_code=499)
     except Exception as e:  # errori OpenAI, rete, ecc.
         # il dettaglio (eccezione e traccia) resta nel log del data agent
         log.exception("Errore durante l'analisi")
         raise HTTPException(500, "Il data agent non è riuscito a completare l'analisi.") from e
+    finally:
+        watcher.cancel()
     result["elapsed_s"] = round(time.time() - t0, 1)
     log.info("Completata in %ss con %s passi e %s grafici", result["elapsed_s"], len(result["steps"]), len(result["charts"]))
-    return result
+    await run_in_threadpool(ANALYSIS_CACHE.put, key, result)
+    return result | {"cached": False}
 
 
 if __name__ == "__main__":

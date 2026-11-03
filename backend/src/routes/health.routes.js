@@ -20,5 +20,9 @@ healthRouter.get("/", async (_req, res) => {
     datasetRows: dataAgent?.dataset_rows ?? null,
     // controllo di colonne e tipi del CSV fatto dal data agent all'avvio
     dataValidation: dataAgent?.validation ?? null,
+    // PNG dei grafici salvati e giorni dopo cui vengono eliminati
+    charts: dataAgent?.charts ?? null,
+    // cache delle analisi del data agent: voci salvate, riusi e analisi rifatte
+    analysisCache: dataAgent?.analysis_cache ?? null,
   });
 });

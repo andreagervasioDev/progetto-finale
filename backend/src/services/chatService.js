@@ -17,8 +17,10 @@ import { assertWithinBudget } from "./usageService.js";
  * @param {object} user  profilo che fa la domanda
  * @param {{sessionId: string, message: string, docId?: string}} turn
  * @param {(event: object) => void} [onEvent]  aggiornamenti di stato per lo streaming
+ * @param {AbortSignal} [signal]  annullato quando il client chiude la connessione: l'agente si ferma e il
+ *   turno non viene salvato (il frontend lo ha già scartato)
  */
-export async function handleTurn(user, { sessionId, message, docId }, onEvent) {
+export async function handleTurn(user, { sessionId, message, docId }, onEvent, signal) {
   const userId = user.id;
   // elemento aperto: un documento (la ricerca può limitarsi a quello) o un file di dati (dataset predefinito)
   const opened = docId ? await getDocument(docId) : null;
@@ -45,7 +47,7 @@ export async function handleTurn(user, { sessionId, message, docId }, onEvent) {
       .filter((d) => !isTabular(d.ext))
       .map((d) => ({ title: d.title, categoryLabel: getCategory(d.category).label, facts: d.facts ?? null }));
     const datasets = await availableDatasets(user).catch(() => []);
-    result = await runAgent(history, message, onEvent, { userId, user, document, dataset, documents, datasets });
+    result = await runAgent(history, message, onEvent, { userId, user, document, dataset, documents, datasets, signal });
     if (key) await storeAnswer(key, result);
   }
 

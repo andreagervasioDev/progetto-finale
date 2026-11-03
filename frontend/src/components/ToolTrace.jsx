@@ -38,6 +38,7 @@ export default function ToolTrace({ trace, sources }) {
                 {t.args?.question && <>Richiesta: “{t.args.question}”</>}
               </p>
               {t.args?.context && <p className="trace-args">Contesto passato: {t.args.context}</p>}
+              {t.cached && <p className="trace-args">Analisi già fatta sugli stessi dati: risultato dalla cache del data agent.</p>}
               {!t.ok && <p className="trace-error">Errore: {t.error}</p>}
 
               {t.sources?.length > 0 && (

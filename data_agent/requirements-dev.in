@@ -1,0 +1,10 @@
+# Dipendenze per i test (pytest, httpx), il controllo delle vulnerabilità (pip-audit), il confronto con
+# DuckDB nel benchmark e la generazione del lock (uv). Le versioni esatte sono in requirements-dev.txt.
+# -c: le dipendenze dell'app restano alle stesse versioni di requirements.txt
+-c requirements.txt
+-r requirements.in
+pytest>=8.0
+httpx>=0.27
+pip-audit>=2.7
+duckdb>=1.1
+uv>=0.5

@@ -11,6 +11,7 @@ L'elenco dei dataset caricati e' persistito in datasets/registry.json, cosi' sop
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -23,6 +24,7 @@ import numpy as np
 import pandas as pd
 
 from cleaning import CleaningReport, clean_dataset
+from conversions import convert_dates, convert_numbers, looks_like_dates
 from validation import ValidationResult, validate
 
 BASE_DIR = Path(__file__).parent
@@ -53,6 +55,8 @@ class Dataset:
     schema: str  # descrizione delle colonne passata all'LLM
     # controlli di colonne e tipi fatti all'avvio (solo per il dataset partite)
     validation: ValidationResult = field(default_factory=ValidationResult)
+    # versione dei dati: impronta del file sorgente e del codice di pulizia (chiave della cache delle analisi)
+    version: str = ""
 
     def summary(self) -> dict:
         return {
@@ -81,8 +85,11 @@ def load_table(content: bytes, filename: str) -> pd.DataFrame:
     last_error: Exception | None = None
     for encoding in ("utf-8-sig", "latin-1"):
         try:
-            # sep=None: pandas riconosce da solo virgola, punto e virgola o tabulazione
-            return pd.read_csv(io.BytesIO(content), sep=None, engine="python", encoding=encoding)
+            # sep=None: pandas riconosce da solo virgola, punto e virgola o tabulazione.
+            # Tutto come testo: le conversioni (numeri, date, segnaposti come "n.d." o "NA") le fa
+            # generic_clean in modo prudente e tracciato; pandas leggerebbe "1.200" come 1,2 in silenzio.
+            return pd.read_csv(io.BytesIO(content), sep=None, engine="python", encoding=encoding,
+                               dtype=str, keep_default_na=False, na_values=[""])
         except Exception as e:  # noqa: BLE001
             last_error = e
     # il dettaglio di pandas (riga, numero di colonne...) resta nei log del data agent
@@ -92,42 +99,8 @@ def load_table(content: bytes, filename: str) -> pd.DataFrame:
 # --------------------------------------------------------------------------- #
 # Pulizia generica (per i dataset caricati)
 # --------------------------------------------------------------------------- #
-_NUMERIC_RE = re.compile(r"^\s*[-+]?[€$£]?\s*[\d.,]+\s*%?\s*[€$£]?\s*$")
-_DATE_HINT = re.compile(r"data|date|scadenza|nascita|giorno|inizio|fine|dal|al", re.I)
-
-
-def _strip_symbols(v) -> str:
-    return str(v).strip().replace("€", "").replace("$", "").replace("£", "").replace("%", "").replace(" ", "")
-
-
-def _is_italian_format(texts: pd.Series) -> bool:
-    """Formato italiano se almeno un valore ha la virgola decimale (1.234,56 / 0,45)
-    o più punti delle migliaia (1.200.000)."""
-    for s in texts:
-        if "," in s and ("." not in s or s.rfind(",") > s.rfind(".")):
-            return True
-        if re.fullmatch(r"[-+]?\d{1,3}(\.\d{3}){2,}", s):
-            return True
-    return False
-
-
-def _to_number(series: pd.Series) -> pd.Series:
-    # il formato si decide sull'intera colonna: "1.200" vale 1200 se la colonna è in formato italiano
-    italian = _is_italian_format(series.dropna().map(_strip_symbols))
-
-    def conv(v):
-        if pd.isna(v):
-            return np.nan
-        if isinstance(v, (int, float, np.number)):
-            return float(v)
-        s = _strip_symbols(v)
-        # italiano 1.234,56 -> 1234.56 ; inglese 1,234.56 -> 1234.56
-        s = s.replace(".", "").replace(",", ".") if italian else s.replace(",", "")
-        try:
-            return float(s)
-        except ValueError:
-            return np.nan
-    return series.map(conv)
+# nomi di colonna che fanno pensare a una data (parole intere: "valore" o "calciatore" non contano)
+_DATE_HINT = re.compile(r"\b(data|date|scadenza|nascita|giorno|inizio|fine|dal|al)\b", re.I)
 
 
 def _n(count: int, singular: str, plural: str) -> str:
@@ -172,19 +145,16 @@ def generic_clean(raw: pd.DataFrame) -> tuple[pd.DataFrame, CleaningReport]:
         trimmed = s.map(lambda v: v.strip() if isinstance(v, str) else v)
         if not trimmed.equals(s):
             df[col] = s = trimmed
-        # numeri salvati come testo ("1.234,50", "15%", "€ 300")
-        if text.map(lambda v: bool(_NUMERIC_RE.match(v))).mean() >= 0.9:
-            converted = _to_number(s)
-            if converted.notna().sum() >= 0.9 * s.notna().sum():
-                df[col] = converted
-                report.add(f"Colonna '{col}': convertita in numero (testo con virgole, punti, % o valuta).")
-                continue
-        # date in vari formati
-        if _DATE_HINT.search(str(col)) or text.str.match(r"^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}").mean() >= 0.8:
-            parsed = pd.to_datetime(s, errors="coerce", dayfirst=True, format="mixed")
-            if parsed.notna().sum() >= 0.8 * s.notna().sum() and parsed.notna().any():
-                df[col] = parsed
-                report.add(f"Colonna '{col}': convertita in data.")
+        # numeri salvati come testo ("1.234,50", "15%", "€ 300") e poi date: conversioni prudenti,
+        # fatte solo se ogni valore e' interpretabile senza indovinare (vedi conversions.py)
+        result = convert_numbers(s, col)
+        if result is None and (_DATE_HINT.search(str(col)) or looks_like_dates(s)):
+            result = convert_dates(s, col)
+        if result is not None:
+            if result.values is not None:
+                df[col] = result.values
+            if result.message:
+                report.add(result.message)
 
     missing = df.isna().sum()
     missing = missing[missing > 0]
@@ -219,17 +189,25 @@ def describe_schema(df: pd.DataFrame, title: str) -> str:
 # --------------------------------------------------------------------------- #
 # Archivio
 # --------------------------------------------------------------------------- #
+def data_version(content: bytes, cleaning_module: str) -> str:
+    """Cambia se cambia il file o il codice che lo pulisce: in entrambi i casi i dati analizzati sono diversi."""
+    code = (BASE_DIR / cleaning_module).read_bytes()
+    return hashlib.sha256(content + b"\0" + code).hexdigest()[:16]
+
+
 class DatasetStore:
     def __init__(self, builtin_path: Path, builtin_schema: str):
         DATASETS_DIR.mkdir(exist_ok=True)
         self._lock = threading.Lock()
         self._items: dict[str, Dataset] = {}
 
-        raw = pd.read_csv(builtin_path)
+        content = builtin_path.read_bytes()
+        raw = pd.read_csv(io.BytesIO(content))
         # colonne attese, pulizia e tipi: solleva SchemaError se il CSV non si puo' usare
         clean, report, validation = validate(raw, clean_dataset)
         self._items[BUILTIN_ID] = Dataset(BUILTIN_ID, "Dati partite (prestazioni giocatori)", builtin_path.name,
-                                          True, raw, clean, report, builtin_schema, validation)
+                                          True, raw, clean, report, builtin_schema, validation,
+                                          data_version(content, "cleaning.py"))
         for entry in self._read_registry():
             try:
                 self._load(entry["id"], entry["title"], entry["filename"])
@@ -250,9 +228,13 @@ class DatasetStore:
         return DATASETS_DIR / f"{dataset_id}{Path(filename).suffix.lower()}"
 
     def _load(self, dataset_id: str, title: str, filename: str) -> Dataset:
-        raw = load_table(self._path(dataset_id, filename).read_bytes(), filename)
+        content = self._path(dataset_id, filename).read_bytes()
+        raw = load_table(content, filename)
         clean, report = generic_clean(raw)
-        ds = Dataset(dataset_id, title, filename, False, raw, clean, report, describe_schema(clean, title))
+        # lo schema per l'LLM riporta anche i passi di pulizia: colonne lasciate come testo e perche'
+        schema = describe_schema(clean, title) + "\nPulizia automatica applicata:\n" + "\n".join(f"- {x}" for x in report.steps)
+        ds = Dataset(dataset_id, title, filename, False, raw, clean, report, schema,
+                     version=data_version(content, "datasets.py"))
         self._items[dataset_id] = ds
         return ds
 

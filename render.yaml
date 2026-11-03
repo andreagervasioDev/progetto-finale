@@ -12,7 +12,9 @@ services:
     plan: free
     region: frankfurt
     healthCheckPath: /api/health
-    autoDeployTrigger: commit
+    # deploy solo se i controlli di GitHub Actions (.github/workflows/ci.yml) sono tutti verdi:
+    # un commit che rompe i test o introduce una vulnerabilità nota non viene pubblicato
+    autoDeployTrigger: checksPass
     envVars:
       # --- segreti: Render li chiede alla creazione del Blueprint ---
       - key: OPENAI_API_KEY
@@ -47,3 +49,5 @@ services:
         value: /data/storage
       - key: DATASETS_DIR
         value: /data/datasets
+      - key: ANALYZE_CACHE_DIR
+        value: /data/cache

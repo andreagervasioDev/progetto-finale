@@ -161,7 +161,16 @@ function ChartTable({ spec }) {
 
 export default function DataChart({ chart }) {
   const [view, setView] = useState("chart");
+  const [pngGone, setPngGone] = useState(false);
   const { spec } = chart;
+
+  // i PNG vecchi vengono eliminati dalla retention del data agent: prima di scaricare controllo che ci sia
+  const checkPng = async (e) => {
+    e.preventDefault();
+    const res = await fetch(chart.url, { method: "HEAD" }).catch(() => null);
+    if (res?.status === 404) return setPngGone(true);
+    Object.assign(document.createElement("a"), { href: chart.url, download: chart.filename }).click();
+  };
   const height = spec.type === "barh" ? Math.max(220, spec.data.length * 30 + 60) : 300;
 
   return (
@@ -189,9 +198,13 @@ export default function DataChart({ chart }) {
       {chart.url && (
         <figcaption>
           <span>{spec.series.length === 1 ? spec.series[0].label : `${spec.series.length} serie`} · {spec.data.length} valori</span>
-          <a href={chart.url} download={chart.filename}>
-            <Icon name="download" size={14} /> Scarica PNG
-          </a>
+          {pngGone ? (
+            <span className="png-gone">PNG eliminato dopo il periodo di conservazione: rifai la domanda per riaverlo</span>
+          ) : (
+            <a href={chart.url} download={chart.filename} onClick={checkPng}>
+              <Icon name="download" size={14} /> Scarica PNG
+            </a>
+          )}
         </figcaption>
       )}
     </figure>

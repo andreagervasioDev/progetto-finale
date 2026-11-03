@@ -87,10 +87,10 @@ def test_archivio_aggiunge_e_rimuove_e_protegge_il_dataset_partite():
         (["1.200.000", "850.000,50", "1.200"], [1200000.0, 850000.5, 1200.0]),  # italiano
         (["0,45", "1,5", "2"], [0.45, 1.5, 2.0]),  # virgola decimale
         (["1,234.56", "0.45", "12"], [1234.56, 0.45, 12.0]),  # inglese
-        (["€ 300", "15%", "-2"], [300.0, 15.0, -2.0]),  # simboli
+        (["€ 300", "€ 1.250,00", "-2"], [300.0, 1250.0, -2.0]),  # valuta e segno
     ],
 )
 def test_conversione_numeri_per_colonna(values, expected):
-    from datasets import _to_number
+    from conversions import convert_numbers
 
-    assert _to_number(pd.Series(values)).tolist() == expected
+    assert convert_numbers(pd.Series(values), "x").values.tolist() == expected

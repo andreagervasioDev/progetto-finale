@@ -1,0 +1,77 @@
+# Test automatici a ogni push e pull request: backend (node:test), data agent (pytest) e controllo delle
+# vulnerabilità delle dipendenze (npm audit + pip-audit). Render pubblica solo i commit con tutti i
+# controlli verdi (autoDeployTrigger: checksPass in render.yaml): codice che rompe i test non va online.
+# Usano gli stessi script della root (npm run test:agent, npm run audit), così in CI gira quello che gira in locale.
+name: CI
+
+on:
+  push:
+  pull_request:
+  # le nuove vulnerabilità vengono pubblicate anche senza modifiche al codice: audit ogni lunedì
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# un nuovo push sullo stesso branch annulla i controlli ancora in corso del precedente
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (npm test)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  data-agent:
+    name: Data agent (pytest)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: data_agent/requirements*.txt
+      # crea data_agent/.venv con requirements-dev.txt (versioni esatte del lock), come in locale
+      - run: npm run setup:python
+      # il lock deve corrispondere ai vincoli: se requirements.in cambia senza rigenerarlo, il controllo è rosso
+      - name: Lock delle dipendenze aggiornato
+        run: npm run lock:python && git diff --exit-code -- data_agent/requirements.txt data_agent/requirements-dev.txt
+      - run: npm run test:agent
+
+  audit:
+    name: Vulnerabilità (npm run audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: data_agent/requirements*.txt
+      # npm audit legge solo i package-lock.json; pip-audit controlla l'ambiente installato
+      - run: npm run setup:python
+      - run: npm run audit

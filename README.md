@@ -131,7 +131,8 @@ progetto-finale/
 ├── package.json                 # script di comodo: setup e avvio di tutti i servizi
 ├── README.md
 ├── Dockerfile, .dockerignore    # immagine unica per il deploy online
-├── render.yaml                  # Blueprint Render (vedi "Deploy online")
+├── render.yaml                  # Blueprint Render (vedi "Deploy online"): deploy solo con i test verdi
+├── .github/workflows/ci.yml     # GitHub Actions: test di backend e data agent e audit a ogni push
 ├── netlify.toml                 # build del frontend su Netlify
 ├── deploy/start.sh              # avvio dei tre servizi nel container
 │
@@ -214,7 +215,8 @@ progetto-finale/
 │       │   ├── vectorStore.js   # client Chroma + embedding OpenAI + retrieval filtrato
 │       │   └── ingest.js        # sincronizzazione/re-indicizzazione da riga di comando
 │       ├── repositories/        # dati salvati su disco (backend/storage/)
-│       │   ├── conversationRepository.js # conversazioni per utente, scrittura atomica
+│       │   ├── jsonFile.js               # scrittura atomica con file temporaneo unico e lock per chiave
+│       │   ├── conversationRepository.js # conversazioni per utente, un lock per conversazione
 │       │   ├── answerCacheRepository.js  # risposte in cache (answer_cache.json)
 │       │   ├── documentRepository.js     # metadati (documents.json) e file (files/)
 │       │   ├── userRepository.js         # utenti con password (hash scrypt) e ruolo admin (users.json)
@@ -226,22 +228,30 @@ progetto-finale/
 │       └── documents/
 │           ├── categories.js    # categorie dell'archivio (con estrazione dati chiave e cartella)
 │           ├── extract.js       # estrazione testo: PDF per pagina (pdf-parse), Word (mammoth), MD/TXT
+│           ├── uploadStorage.js # file caricati in una cartella temporanea, cancellabili se la ricezione si interrompe
 │           └── fileCheck.js     # controllo del contenuto dei file caricati (firma del formato, zip bomb)
 │
-└── data_agent/                  # Python 3.10+ / FastAPI
+└── data_agent/                  # Python 3.12+ / FastAPI
     ├── app.py                   # microservizio: /analyze, /datasets, /charts, /health
     ├── datasets.py              # archivio dataset: lettura CSV/Excel, pulizia generica, schema per l'LLM
+    ├── conversions.py           # conversioni prudenti testo → numero / data per i file caricati, con report
     ├── agent.py                 # pandas agent ReAct (OpenAI tool calling)
     ├── charts.py                # chart() e table(): JSON per il frontend React + PNG con matplotlib
     ├── executor.py              # sandbox: AST + builtins ridotti + I/O neutralizzato + timeout
     ├── cleaning.py              # pipeline di data cleaning dedicata al dataset partite
     ├── validation.py            # controllo all'avvio di colonne e tipi del CSV partite
+    ├── retention.py             # eliminazione periodica dei PNG dei grafici più vecchi della soglia
+    ├── analysis_cache.py        # cache delle analisi (domanda, contesto, dataset, versione dei dati, modello)
+    ├── upload_limit.py          # limite effettivo dei caricamenti: lettura a blocchi, 413 oltre la soglia
     ├── benchmark.py             # tempi e memoria delle analisi su dataset sempre più grandi
     ├── benchmark_results/       # ultimo report del benchmark (results.md, results.json)
     ├── datasets/                # file Excel/CSV caricati dagli utenti (escluso da git)
     ├── tests/                   # test pytest: pulizia, validazione, interprete, dataset, benchmark, API
-    ├── requirements.txt
-    ├── requirements-dev.txt     # requirements.txt + pytest e httpx per i test
+    ├── requirements.in          # vincoli delle dipendenze (cosa serve e da quale versione)
+    ├── requirements.txt         # lock generato: versioni esatte da installare
+    ├── requirements-dev.in      # vincoli in più per test, audit, benchmark e lock
+    ├── requirements-dev.txt     # lock generato: app + strumenti di sviluppo, alle stesse versioni
+    ├── lock.sh                  # rigenera i due lock con uv (npm run lock:python)
     ├── charts/                  # PNG generati a runtime
     └── data/
         ├── generate_dataset.py  # generatore riproducibile del CSV (seed fisso)
@@ -256,7 +266,7 @@ progetto-finale/
 |---|---|---|
 | Node.js | **20 o superiore** (testato con 22) | `node -v` |
 | npm | 10 o superiore | `npm -v` |
-| Python | **3.10 o superiore** (testato con 3.13) | `python3 --version` |
+| Python | **3.12 o superiore** (testato con 3.13) | `python3 --version` |
 | Chiave API OpenAI | con accesso a chat completions ed embeddings | [platform.openai.com](https://platform.openai.com/api-keys) |
 
 ChromaDB **non** richiede installazioni separate: il server locale è incluso nel pacchetto npm `chromadb` (comando `chroma run`).
@@ -311,6 +321,17 @@ npm install
 > Il CSV è già incluso. Per rigenerarlo in modo identico (seed fisso):
 > `cd data_agent && .venv/bin/python data/generate_dataset.py`
 
+### Versioni delle dipendenze Python
+
+`requirements.txt` e `requirements-dev.txt` sono **lock file**: contengono la versione esatta di ogni pacchetto, comprese le dipendenze indirette (pandas 3.0.6, numpy 2.5.3, openai 3.19.0, …). Chi installa oggi o tra un anno ottiene lo stesso ambiente usato per i test e per il benchmark, in locale, nell'immagine Docker e in GitHub Actions. I vincoli veri, cioè cosa serve e da quale versione (per esempio `pandas>=3.0,<4`), sono in `requirements.in` e `requirements-dev.in`, e da lì si genera il lock:
+
+```bash
+npm run lock:python                # dopo aver cambiato un vincolo: le altre versioni restano quelle bloccate
+npm run lock:python -- --upgrade   # per passare alle ultime versioni ammesse dai vincoli (poi rilanciare i test)
+```
+
+Il lock è generato con [uv](https://docs.astral.sh/uv/) (`uv pip compile --universal`, installato con `requirements-dev.txt`). Rispetto a pip-tools, che risolve le dipendenze solo per il sistema su cui gira, `--universal` produce un unico file valido su macOS, Linux e Windows, con le dipendenze di ogni sistema indicate da un marker (per esempio `tzdata` e `colorama` solo su Windows). Per installare non serve uv: basta `pip install -r requirements.txt`. In GitHub Actions un controllo rigenera il lock e fallisce se non coincide con quello nel repository, cioè se un vincolo è stato cambiato senza rigenerarlo. Python minimo è 3.12, perché numpy 2.5 lo richiede: con un Python più vecchio pip si ferma con un errore invece di installare versioni diverse.
+
 ---
 
 ## 7. Configurazione (.env)
@@ -337,6 +358,8 @@ OPENAI_API_KEY=sk-...la-tua-chiave...
 | `OPENAI_MODEL` | `gpt-4.1-mini` | Modello per l'orchestratore e il pandas agent |
 | `DATA_AGENT_MODEL` | = `OPENAI_MODEL` | Modello diverso solo per il data agent (facoltativo) |
 | `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding per la RAG |
+| `OPENAI_TIMEOUT_MS` | `60000` | Tempo massimo di ogni chiamata a OpenAI, nel backend e nel data agent |
+| `OPENAI_MAX_RETRIES` | `1` | Tentativi in più dopo un errore di rete o un timeout |
 | `STORAGE_DIR` | `storage` | Cartella (dentro `backend/`) con profilo, documenti e conversazioni |
 | `KNOWLEDGE_BASE_DIR` | `knowledge_base` | Cartella (dentro `backend/`) dei documenti ufficiali importati all'avvio |
 | `DATASETS_DIR` | `datasets` | Cartella (dentro `data_agent/`) dei file Excel/CSV registrati nel data agent |
@@ -349,6 +372,11 @@ OPENAI_API_KEY=sk-...la-tua-chiave...
 | `DAILY_BUDGET_USD` | `0` | Tetto di spesa OpenAI stimata al giorno (dollari); `0` = nessun limite |
 | `QUERY_CACHE_TTL_HOURS` | `24` | Durata delle risposte in cache, in ore; `0` = cache disattivata |
 | `QUERY_CACHE_MAX_ENTRIES` | `200` | Numero massimo di risposte conservate in cache |
+| `CHARTS_RETENTION_DAYS` | `30` | Giorni dopo cui i PNG dei grafici vengono eliminati; `0` = mai |
+| `CHARTS_CLEANUP_INTERVAL_HOURS` | `6` | Ogni quante ore il data agent controlla i PNG da eliminare |
+| `ANALYZE_CACHE_TTL_HOURS` | `24` | Durata delle analisi in cache nel data agent, in ore; `0` = cache disattivata |
+| `ANALYZE_CACHE_MAX_ENTRIES` | `200` | Numero massimo di analisi conservate nella cache del data agent |
+| `ANALYZE_CACHE_DIR` | `cache` | Cartella (dentro `data_agent/`) del file della cache delle analisi |
 | `DEFAULT_ADMIN_PASSWORD` / `DEFAULT_TEST_PASSWORD` | `admin` / `test` | Password degli utenti creati al primo avvio |
 | `AUTH_SECRET` | generata | Chiave che firma le sessioni; se manca viene creata in `backend/storage/.auth_secret` |
 | `SESSION_DAYS` | `7` | Durata della sessione dopo il login |
@@ -438,7 +466,9 @@ Le password sono salvate come hash (scrypt) in `backend/storage/users.json`; que
 - Controlla lo stato di tutti i servizi con: `curl http://localhost:3002/api/health`
   ```json
   {"backend":"ok","chroma":"ok","knowledgeBaseChunks":37,"dataAgent":"ok","datasetRows":1539,"openaiKeyConfigured":true,
-   "dataValidation":{"ok":true,"errors":[],"warnings":[]}}
+   "dataValidation":{"ok":true,"errors":[],"warnings":[]},
+   "charts":{"files":11,"size_mb":0.6,"retention_days":30.0},
+   "analysisCache":{"entries":0,"hits":0,"misses":0,"ttl_hours":24.0}}
   ```
 - Documentazione interattiva del data agent: http://localhost:8001/docs
 
@@ -464,7 +494,7 @@ Per la correzione basta l'avvio in locale. Per una demo online il repository con
 
 Il piano gratuito non ha un disco permanente: utenti, conversazioni e documenti caricati si azzerano a ogni riavvio e a ogni deploy (anche a ogni `git push`), mentre i documenti ufficiali e il dataset delle partite si ricaricano dal repository. Dopo 15 minuti senza visite il servizio si spegne e la visita successiva aspetta circa un minuto: per tenerlo acceso basta un controllo esterno ogni 5-10 minuti su `/api/health`, per esempio con UptimeRobot. Per conservare i dati serve un piano a pagamento con un disco montato in `/data`.
 
-Su Render: **New → Blueprint**, scegli il repository e inserisci `OPENAI_API_KEY`, `DEFAULT_ADMIN_PASSWORD` e `DEFAULT_TEST_PASSWORD` (non usare `admin` e `test` su un sito pubblico). L'app è all'indirizzo del servizio: la demo di questo progetto è su **https://management-ai-r5nl.onrender.com**. Rinominare il servizio su Render non cambia l'indirizzo.
+Su Render: **New → Blueprint**, scegli il repository e inserisci `OPENAI_API_KEY`, `DEFAULT_ADMIN_PASSWORD` e `DEFAULT_TEST_PASSWORD` (non usare `admin` e `test` su un sito pubblico). Il deploy parte da solo dopo ogni `git push`, ma solo quando i test di GitHub Actions sono passati (vedi [Test](#9-test)). L'app è all'indirizzo del servizio: la demo di questo progetto è su **https://management-ai-r5nl.onrender.com**. Rinominare il servizio su Render non cambia l'indirizzo.
 
 Il frontend è pubblicato anche su **Netlify** (https://progetto-management-ai.netlify.app): `netlify.toml` dice a Netlify di compilare la cartella `frontend/` e pubblicare `frontend/dist`, e `frontend/public/_redirects` inoltra `/api/*` al servizio Render: controlla che l'indirizzo nel file sia quello del tuo servizio. Il proxy di Netlify chiude le richieste che non iniziano a rispondere entro 26 secondi: la chat non ne risente, perché lo streaming parte subito, mentre il caricamento di un PDF molto lungo può fallire. In quel caso usa direttamente l'indirizzo Render.
 
@@ -487,6 +517,16 @@ cd data_agent && .venv/bin/python -m pytest -q tests             # Python (pytes
 
 **Vulnerabilità note delle dipendenze**: `npm run audit` (dalla root, macOS / Linux) controlla in un colpo i pacchetti npm della root, del backend e del frontend (`npm audit`) e l'ambiente Python del data agent (`pip-audit`). Va rilanciato ogni tanto: i nuovi avvisi di sicurezza vengono pubblicati di continuo.
 
+**Test automatici a ogni push** (`.github/workflows/ci.yml`): GitHub Actions esegue tre controlli in parallelo, con gli stessi comandi che si usano in locale:
+
+| Job | Cosa fa |
+|---|---|
+| Backend (npm test) | Node 22, `npm ci` e `npm test` in `backend/` |
+| Data agent (pytest) | Python 3.13, `npm run setup:python` (crea `data_agent/.venv` con le versioni esatte di `requirements-dev.txt`), controllo che il lock corrisponda ai vincoli (`npm run lock:python` senza differenze) e `npm run test:agent` |
+| Vulnerabilità (npm run audit) | `npm audit` di root, backend e frontend e `pip-audit` del data agent; gira anche ogni lunedì, perché i nuovi avvisi escono anche senza modifiche al codice |
+
+Partono a ogni push e pull request, su qualunque branch; un nuovo push sullo stesso branch annulla i controlli ancora in corso. Render pubblica un commit solo se **tutti e tre** sono verdi (`autoDeployTrigger: checksPass` in `render.yaml`): un commit che rompe i test, o che porta una dipendenza con una vulnerabilità nota, resta su GitHub ma non va online. L'esito si vede nella scheda **Actions** del repository e accanto a ogni commit.
+
 | Test | Cosa verifica |
 |---|---|
 | `backend/tests/chunker.test.js` | divisione per sezioni Markdown e per pagina, dimensione massima e sovrapposizione dei chunk |
@@ -502,9 +542,17 @@ cd data_agent && .venv/bin/python -m pytest -q tests             # Python (pytes
 | `data_agent/tests/test_executor.py` | sandbox: esecuzione del codice pandas, blocco di lettura file (`.env`), rete, scrittura su disco, import, `eval`, attributi dunder, alias delle funzioni e timeout |
 | `data_agent/tests/test_datasets.py` | pulizia dei CSV/Excel caricati: formati italiani (`€ 1.234,50`, `1.200.000`, `15%`, gg/mm/aaaa), duplicati, righe vuote |
 | `backend/tests/fileCheck.test.js` | controllo del contenuto dei file caricati: firma del formato (eseguibile rinominato `.pdf`, binario rinominato `.csv`), zip bomb (dimensione, rapporto di compressione, numero di elementi), archivi danneggiati |
+| `backend/tests/http.test.js` (limite upload) | caricamento con `Content-Length` oltre 20 MB → 413 senza leggere il corpo; corpo a blocchi senza `Content-Length` → connessione chiusa poco oltre la soglia e nessun file parziale |
+| `backend/tests/repositories.test.js` | scritture contemporanee: due `appendTurn` in parallelo sulla stessa conversazione (e 20 insieme) senza turni persi, rinomina ed eliminazione insieme a un nuovo turno, accessi in parallelo su `users.json`, nessun file temporaneo rimasto; coda del lock (stessa chiave in fila, chiavi diverse in parallelo, un errore non blocca la coda) |
+| `backend/tests/cancel.test.js` | annullamento della chat con finti server OpenAI e data agent: turno normale completato e salvato; client che chiude durante il data agent o durante OpenAI (stream e JSON) → chiamata in corso chiusa, nessun passo successivo, turno non salvato; OpenAI che non risponde → errore dopo `OPENAI_TIMEOUT_MS` |
 | `backend/tests/sanitize.test.js` | pulizia dell'HTML dei file Word: rimozione di script, gestori di eventi, iframe, link `javascript:` e immagini `data:text/html`; formattazione legittima conservata |
 | `data_agent/tests/test_charts.py` | grafici e tabelle: specifica JSON (serie, colori, date, NaN), errori comprensibili per l'LLM, PNG con matplotlib, limite di righe delle tabelle, istruzioni del pandas agent |
 | `data_agent/tests/test_validation.py` | controllo all'avvio: CSV valido, colonne mancanti (avvio bloccato), colonne in più, tipi e categorie sbagliati dopo la pulizia, `/health` |
+| `data_agent/tests/test_conversions.py` | conversioni prudenti: numeri ambigui, formati italiano/inglese mescolati, valute e percentuali miste, separatori non validi, colonne eterogenee, segnaposti di dato mancante, celle Excel miste; date ambigue, ordine giorno/mese provato o incoerente, formati misti ISO/italiano, anni a due cifre, date inesistenti; file completo con report e schema per l'LLM |
+| `data_agent/tests/test_upload_limit.py` | limite di caricamento: `Content-Length` oltre il limite → 413 senza leggere nessun blocco; corpo senza `Content-Length` interrotto appena supera la soglia; lettura a blocchi che si ferma oltre il limite; file da 20 MB + 1 byte rifiutato da `/datasets` |
+| `data_agent/tests/test_analysis_cache.py` | cache delle analisi: chiave che cambia con domanda, contesto, dataset, versione dei dati e modello; scadenza; analisi rifatta se il PNG è stato eliminato; limite di voci; `/analyze` dalla cache senza OpenAI e senza contare di nuovo i token |
+| `data_agent/tests/test_retention.py` | retention dei grafici: eliminati solo i PNG di `chart()` oltre la soglia, altri file e link intatti, soglia 0 = disattivata, pulizia all'avvio, cartella dei test isolata |
+| `data_agent/tests/test_cancel.py` | analisi annullata: nessuna chiamata a OpenAI se la richiesta è già chiusa, niente codice né passo successivo se si chiude durante una chiamata, timeout esplicito del client OpenAI; uvicorn reale con un finto OpenAI lento e connessione chiusa a metà → analisi interrotta dopo una sola chiamata |
 | `data_agent/tests/test_benchmark.py` | dataset ingranditi con le stesse anomalie, analisi del benchmark, report scritto |
 | `data_agent/tests/test_api.py` | API FastAPI: health, panoramica, caricamento e rimozione di un dataset, validazione di `/analyze` |
 
@@ -595,18 +643,22 @@ La knowledge base è composta dai **documenti ufficiali del club** (i file di `b
 - Supporta **chiamate parallele** e **catene di strumenti** (KB → data agent con `context`).
 - **Contesto per richiesta**: il system prompt include l'utente, l'archivio raggruppato per categoria, i **dati chiave** (scadenze e importi), i **dataset disponibili** con le loro colonne e l'eventuale documento o dataset aperto. Con un documento aperto il tool di ricerca espone il parametro `scope` (`documento_aperto` / `tutti`); con un dataset aperto l'analisi usa quel `dataset_id`.
 - **Memoria e cronologia**: ogni conversazione è salvata in `backend/storage/conversations/<userId>/<id>.json` con testo, grafici, fonti e passi dell'agente, scritta in modo atomico. Sopravvive al riavvio dei servizi. Dalla sidebar "Cronologia" (raggruppata per Oggi, Ieri, Ultimi 7 giorni) si può riaprire una chat passata e continuarla: all'LLM vengono ripassati gli ultimi `MAX_HISTORY_MESSAGES` messaggi. Il browser ricorda solo quale conversazione era aperta.
+- **Scritture contemporanee** (`repositories/jsonFile.js`): un nuovo turno legge la conversazione, aggiunge i messaggi e la riscrive. Se due richieste toccano la stessa conversazione insieme (per esempio pannello laterale e pagina Assistente aperti), senza protezione l'ultima scrittura cancella i messaggi dell'altra, e le due scritture possono anche scontrarsi sullo stesso file temporaneo, fino a lasciare un JSON corrotto. Per questo ogni conversazione ha un **lock** (una coda di Promise per chiave `utente/conversazione`): nuovo turno, rinomina ed eliminazione della stessa conversazione avvengono una alla volta, mentre conversazioni diverse restano in parallelo. Ogni scrittura usa un **file temporaneo con nome unico** (`<file>.<uuid>.tmp`) poi rinominato, e se fallisce il temporaneo viene cancellato. Lo stesso vale per `users.json`, `documents.json` e `answer_cache.json`: le scritture sono in fila e il primo caricamento è condiviso dalle richieste contemporanee, così al primo avvio gli utenti predefiniti non vengono creati due volte.
+- **Annullamento e timeout**: il frontend annulla la richiesta (`AbortController` in `ChatContext.jsx`) quando si apre un'altra conversazione o se ne inizia una nuova. Le rotte `/api/chat` e `/api/chat/stream` creano un `AbortController` legato alla connessione (`res.on("close")` prima che la risposta sia finita: l'evento `close` della richiesta non va bene, perché scatta già quando il corpo JSON è stato letto) e ne passano il `signal` a `runAgent`. Il ciclo ReAct controlla il signal a ogni passo e lo passa a `openai.chat.completions.create` e a `dataAgentClient.analyzeData` (unito al timeout con `AbortSignal.any`), quindi la chiamata in corso viene chiusa e il passo successivo non parte. Un turno annullato non viene salvato né messo in cache. Il data agent se ne accorge a sua volta (`request.is_disconnected()`, controllato ogni mezzo secondo) e ferma il pandas agent prima della chiamata a OpenAI o del blocco di codice successivo. Tutte le chiamate a OpenAI hanno poi un tempo massimo esplicito (`OPENAI_TIMEOUT_MS`, 60 s) con un solo nuovo tentativo (`OPENAI_MAX_RETRIES`); senza, l'SDK aspetta fino a 10 minuti per chiamata, con due tentativi in più.
 - Ogni risposta include la `trace`, cioè i passi, gli argomenti, la durata, le fonti, il codice e il report di pulizia. Il flusso è quindi **verificabile**.
 - **Cache delle risposte** (`services/answerCacheService.js`): se la stessa domanda è il primo messaggio di una nuova conversazione e ha già una risposta valida, la risposta torna subito, senza chiamare OpenAI né il data agent, e in chat compare l'etichetta "Risposta dalla cache". La chiave combina la domanda normalizzata (maiuscole, spazi e punteggiatura finale non contano), il documento o dataset aperto, un'impronta dell'archivio (documenti e dataset visibili: se uno viene caricato, modificato o eliminato, le vecchie risposte non valgono più) e il modello. Dal secondo messaggio in poi la cache non si usa, perché la risposta dipende anche dalla cronologia ("E solo per i difensori?"). Non si salvano risposte vuote o con uno strumento fallito. Le voci scadono dopo `QUERY_CACHE_TTL_HOURS` ore e ne restano al massimo `QUERY_CACHE_MAX_ENTRIES` (si eliminano quelle usate meno di recente); sono salvate in `backend/storage/answer_cache.json`. Le risposte dalla cache non costano nulla, quindi passano anche oltre il tetto di spesa giornaliero.
 
 ### Pandas agent (data_agent)
+- **Cache delle analisi** (`analysis_cache.py`): se `/analyze` riceve di nuovo la stessa richiesta sugli stessi dati, restituisce subito il risultato salvato (testo, grafici, tabelle, passi), senza chiamare OpenAI né rieseguire codice. La chiave combina domanda e contesto normalizzati, dataset, **versione dei dati** (impronta del file e del codice di pulizia: se uno dei due cambia, le analisi vecchie non valgono più) e modello. Le voci scadono dopo `ANALYZE_CACHE_TTL_HOURS` ore, ne restano al massimo `ANALYZE_CACHE_MAX_ENTRIES` e un'analisi i cui PNG sono stati eliminati dalla retention viene rifatta. Le risposte dalla cache dichiarano zero token, così la spesa non viene contata due volte, e nei passi "Come ho risposto" compare "risultato dalla cache del data agent". Lavora insieme alla cache delle risposte del backend: quella evita l'intero turno quando la stessa domanda apre una nuova conversazione; questa evita il lavoro del data agent anche dentro conversazioni diverse, ogni volta che l'orchestratore chiede la stessa analisi.
 - **Validazione all'avvio** (`validation.py`): prima della pulizia controlla che il CSV delle partite abbia tutte le 40 colonne attese; dopo la pulizia controlla il tipo di ogni colonna (intero, decimale, data, testo), i valori ammessi di ruolo, competizione e casa/trasferta e le date. Se mancano colonne o la pulizia fallisce, il data agent **non parte** e scrive nel log cosa manca: meglio fermarsi che analizzare dati sbagliati. Tipi o categorie sbagliati e colonne in più vengono **segnalati** nel log, in `/api/health` (`dataValidation`) e con un avviso nella pagina Dati.
 - Agente ReAct con un solo strumento, `run_python`: l'LLM scrive codice, `executor.py` lo **esegue davvero** in un namespace persistente e l'output reale torna al modello. I numeri della risposta vengono quindi da calcoli effettivi e non da stime dell'LLM (interprete deterministico).
-- **Più dataset**: il dataset partite usa la **pipeline di cleaning dedicata** (`cleaning.py`); i file Excel/CSV caricati passano da una **pulizia generica** tracciata (`datasets.py`): nomi di colonna, righe e colonne vuote, duplicati, spazi, numeri salvati come testo in formato italiano (`€ 1.234,50`, `15%`), date. Lo **schema** di ogni file (tipi, range, esempi di valori) viene generato in automatico e passato all'LLM. Excel: primo foglio non vuoto; CSV: separatore e codifica rilevati automaticamente.
+- **Più dataset**: il dataset partite usa la **pipeline di cleaning dedicata** (`cleaning.py`); i file Excel/CSV caricati passano da una **pulizia generica** tracciata (`datasets.py`): nomi di colonna, righe e colonne vuote, duplicati, spazi, numeri salvati come testo in formato italiano (`€ 1.234,50`, `15%`), date. Le conversioni sono **prudenti** (`conversions.py`): una colonna diventa numero o data solo se **ogni** valore è interpretabile senza indovinare, altrimenti resta testo, nessun valore cambia e il report dice perché, con conteggi ed esempi. Restano testo, per esempio: numeri ambigui senza altri indizi nella colonna (`1.200` è mille e duecento o uno virgola due?), formati italiano e inglese mescolati, valute diverse, percentuali mescolate a numeri senza `%`, colonne eterogenee (`850,50` accanto a "in prestito"), date tutte ambigue (`03/04/2025` senza nessun valore che provi l'ordine giorno/mese), ordine giorno/mese incoerente, date inesistenti (`31/02`). Quando invece la colonna dà un indizio certo (una virgola decimale, un `25/03`), i valori ambigui vengono letti di conseguenza e il report lo segnala. I segnaposti espliciti di dato mancante (`n.d.`, `-`, `N/A`...) diventano vuoti e vengono contati. I CSV sono letti come testo, così nessuna conversione avviene in silenzio dentro pandas, e i passi di pulizia finiscono anche nello schema passato all'LLM. Lo **schema** di ogni file (tipi, range, esempi di valori) viene generato in automatico e passato all'LLM. Excel: primo foglio non vuoto; CSV: separatore e codifica rilevati automaticamente.
 - L'agente riceve `df` (pulito), `df_raw` (grezzo) e `cleaning_report`, e può applicare **pulizie aggiuntive specifiche per la domanda** (per le partite: escludere rating NaN, soglia minima di minuti, esclusione dei portieri).
 - **Grafici e tabelle** (`charts.py`): l'agente non disegna a mano, ma chiama due funzioni:
   - `chart(data, kind, x, y, title, ...)` con `kind` = `bar`, `barh`, `line` o `scatter` (al massimo 4 serie): valida i dati e produce una **specifica JSON** (assi, serie, punti) che il frontend disegna con **componenti React** (Recharts), interattivi e nello stile dell'app. Con lo stesso codice, nostro e non scritto dall'LLM, disegna anche il **PNG con matplotlib** e lo salva in `charts/`, come chiede la traccia: l'immagine si scarica dal grafico ("Scarica PNG").
   - `table(data, title)`: una tabella JSON (massimo 50 righe) mostrata come tabella vera nella chat.
   - Se i dati non vanno bene (troppi punti, colonna non numerica, tipo non supportato) la funzione risponde con un messaggio che dice all'LLM come correggere il codice.
+  - **Retention dei PNG** (`retention.py`): ogni grafico è un file con nome univoco, quindi senza pulizia si accumulano. All'avvio e poi ogni `CHARTS_CLEANUP_INTERVAL_HOURS` ore il data agent elimina i PNG più vecchi di `CHARTS_RETENTION_DAYS` giorni (default 30; `0` = mai). Tocca solo i file con il nome generato da `chart()` (`chart_<esadecimale>.png`). Nelle conversazioni i grafici React restano visibili, perché i loro dati sono salvati nella conversazione: manca solo il PNG, e "Scarica PNG" lo segnala. I grafici solo immagine delle prime versioni mostrano "Grafico non più disponibile". Numero di file, spazio occupato e soglia sono in `/api/health` (`charts`).
   - matplotlib e seaborn non sono disponibili al codice generato: i grafici passano solo da `chart()`. Se un tipo di grafico non è supportato (es. una heatmap), l'agente mostra i dati con `table()`.
   - La palette (verde campo, arancione, blu, ocra) è la stessa nel PNG e nel frontend, validata per contrasto e daltonismo; ogni grafico ha anche la **vista a tabella**, così i valori non dipendono dal colore.
 - **Perché non `create_pandas_dataframe_agent` di LangChain?** Un agente custom con l'SDK OpenAI dà pieno controllo su sicurezza (validazione AST), gestione dei grafici, formato della risposta e tracciamento dei passi. Inoltre evita le frequenti incompatibilità di versione di `langchain-experimental`. Il paradigma resta lo stesso: ReAct con uno strumento Python REPL.
@@ -629,7 +681,7 @@ cd data_agent
 .venv/bin/python benchmark.py --sizes 1578 1000000     # dimensioni a scelta
 ```
 
-Il report completo è in [`data_agent/benchmark_results/results.md`](data_agent/benchmark_results/results.md). Risultati principali (MacBook con Apple Silicon, pandas 3.0):
+Il report completo è in [`data_agent/benchmark_results/results.md`](data_agent/benchmark_results/results.md). Risultati principali (MacBook con Apple Silicon, pandas 3.0.6, la versione bloccata in `requirements.txt`):
 
 | Righe | Pulizia | Analisi più lenta (pandas) | Stessa analisi (DuckDB) | Picco di memoria all'avvio |
 |---:|---:|---:|---:|---:|
@@ -727,9 +779,9 @@ curl -X POST http://localhost:3002/api/chat \
 
   Queste barriere sono verificate da `data_agent/tests/test_executor.py` (lettura del `.env`, accesso alla rete, scrittura su disco, evasione via dunder, alias delle funzioni, timeout).
   *Limite noto*: non è una sandbox a livello di sistema operativo. Resta fuori portata il limite di memoria rigido e l'interruzione di un ciclo infinito "puro" senza I/O (Python non termina un thread dall'esterno). In produzione il data agent va comunque eseguito in un container isolato, senza rete e senza segreti nell'ambiente, con limiti di CPU e memoria imposti dal sistema.
-- **Upload**: solo estensioni consentite (PDF, DOCX, TXT, MD, CSV, XLSX, XLS), massimo 20 MB, file salvati con nome casuale (id) fuori dalla cartella pubblica. Prima di qualsiasi elaborazione, `documents/fileCheck.js` controlla il **contenuto reale** del file: la firma iniziale deve corrispondere all'estensione (`%PDF-` per i PDF, archivio zip per `.docx`/`.xlsx`, firma Office per `.xls`, nessun byte nullo nei file di testo), così un eseguibile rinominato `.pdf` viene rifiutato. Per gli archivi zip legge l'indice senza decomprimere e rifiuta gli **zip bomb** (oltre 200 MB decompressi, più di 5000 elementi, o un rapporto di compressione oltre 100:1 sopra i 10 MB). Un file rifiutato viene cancellato subito (risposta 422). Se l'indicizzazione fallisce, il caricamento viene annullato senza lasciare documenti a metà. L'HTML ricavato dai file Word (un .docx non è fidato) viene mostrato nel lettore dopo una **sanitizzazione** con `sanitize-html`: si conserva solo una whitelist di tag e attributi di formattazione (titoli, paragrafi, liste, tabelle, grassetto/corsivo, link, immagini), mentre `<script>`, i gestori di eventi (`onclick`...), gli `<iframe>`, i link `javascript:`/`vbscript:` e le immagini `data:text/html` vengono rimossi. I link esterni si aprono con `rel="noopener"`. Verificato da `backend/tests/sanitize.test.js`. Il Markdown è mostrato senza HTML grezzo.
+- **Upload**: solo estensioni consentite (PDF, DOCX, TXT, MD, CSV, XLSX, XLS), massimo 20 MB, file salvati con nome casuale (id) fuori dalla cartella pubblica. Il limite di 20 MB è **effettivo**: un file troppo grande non viene mai letto per intero né tenuto in memoria. L'interfaccia lo blocca prima dell'invio; il backend risponde subito 413 se la dimensione dichiarata (`Content-Length`) supera il limite, scrive il file su disco a blocchi (multer) fermandosi alla soglia e, se il corpo arriva senza dimensione dichiarata, conta i byte mentre arrivano e chiude la connessione appena si supera la soglia, cancellando il file parziale (`documents/uploadStorage.js`). Il data agent fa lo stesso su `POST /datasets` con un middleware ASGI (`upload_limit.py`) che rifiuta in base a `Content-Length` o interrompe la lettura del corpo oltre la soglia con un 413, e legge il file a blocchi da 1 MB. Prima di qualsiasi elaborazione, `documents/fileCheck.js` controlla il **contenuto reale** del file: la firma iniziale deve corrispondere all'estensione (`%PDF-` per i PDF, archivio zip per `.docx`/`.xlsx`, firma Office per `.xls`, nessun byte nullo nei file di testo), così un eseguibile rinominato `.pdf` viene rifiutato. Per gli archivi zip legge l'indice senza decomprimere e rifiuta gli **zip bomb** (oltre 200 MB decompressi, più di 5000 elementi, o un rapporto di compressione oltre 100:1 sopra i 10 MB). Un file rifiutato viene cancellato subito (risposta 422). Se l'indicizzazione fallisce, il caricamento viene annullato senza lasciare documenti a metà. L'HTML ricavato dai file Word (un .docx non è fidato) viene mostrato nel lettore dopo una **sanitizzazione** con `sanitize-html`: si conserva solo una whitelist di tag e attributi di formattazione (titoli, paragrafi, liste, tabelle, grassetto/corsivo, link, immagini), mentre `<script>`, i gestori di eventi (`onclick`...), gli `<iframe>`, i link `javascript:`/`vbscript:` e le immagini `data:text/html` vengono rimossi. I link esterni si aprono con `rel="noopener"`. Verificato da `backend/tests/sanitize.test.js`. Il Markdown è mostrato senza HTML grezzo.
 - Il data agent ascolta solo su `127.0.0.1`. Il backend valida l'input (lunghezza massima) e i nomi dei file dei grafici (regex, niente path traversal) e limita CORS all'origine del frontend.
-- **Dipendenze senza vulnerabilità note** (verificato con `npm run audit`). Un caso particolare: `mammoth` dipende da `argparse` 1.x, che a sua volta usa `sprintf-js`, vulnerabile in tutte le versioni pubblicate. `argparse` serve solo al comando da terminale di mammoth (`bin/mammoth`), mai alla libreria usata dal backend; per eliminare comunque la dipendenza vulnerabile, `backend/package.json` contiene un `overrides` che usa `argparse` 2.x (senza `sprintf-js`).
+- **Dipendenze senza vulnerabilità note**, verificato con `npm run audit` anche in GitHub Actions a ogni push e ogni lunedì. Al momento di aggiungere la CI l'audit ne ha trovate alcune, tutte risolte con aggiornamenti compatibili: `body-parser`, `multer` e `qs` nel backend, `vite` nel frontend, `pillow` (dipendenza di matplotlib, ora richiesta in `requirements.txt` dalla 13.0) nel data agent. Un caso particolare: `mammoth` dipende da `argparse` 1.x, che a sua volta usa `sprintf-js`, vulnerabile in tutte le versioni pubblicate. `argparse` serve solo al comando da terminale di mammoth (`bin/mammoth`), mai alla libreria usata dal backend; per eliminare comunque la dipendenza vulnerabile, `backend/package.json` contiene un `overrides` che usa `argparse` 2.x (senza `sprintf-js`).
 - **Dati sensibili** (certificati medici, contratti, offerte di mercato): i file restano sul computer che esegue la piattaforma, ma i pezzi di testo vengono inviati a OpenAI per gli embedding, per l'estrazione dei dati chiave e, quando pertinenti, per le risposte. L'archivio è condiviso tra tutti gli utenti collegati. Per un uso reale servirebbero permessi per categoria (il filtro `ownerId`/`visibility` è già presente nei metadati), un accordo sul trattamento dei dati con il provider o un modello eseguito in locale.
 
 ---
@@ -743,6 +795,9 @@ curl -X POST http://localhost:3002/api/chat \
 - **Dati chiave estratti dall'AI.** Viene letta solo la parte iniziale del documento (circa 6.000 caratteri) e si estrae **una sola** scadenza per documento; i valori non si correggono a mano. La scheda nel lettore lo segnala ("da verificare sul documento").
 - **Scadenze passate.** Nella Home restano visibili per 60 giorni, poi compaiono solo nel lettore del documento.
 - **Excel.** Viene letto solo il primo foglio con dati.
+- **Colonne ambigue dei file caricati.** Per prudenza restano testo (vedi [Dettagli tecnici](#12-dettagli-tecnici)): il pandas agent le vede come testo, con il motivo nello schema, e può convertirle durante l'analisi se la domanda chiarisce il formato.
+- **Annullamento non istantaneo in due punti.** La ricerca su ChromaDB (con il suo embedding) non accetta un signal: se è già partita finisce, ma dura una frazione di secondo e dopo non parte altro. Nel data agent un blocco di codice pandas già in esecuzione arriva in fondo (al massimo `DATA_AGENT_EXEC_TIMEOUT` secondi). I token di una chiamata a OpenAI interrotta a metà possono essere fatturati senza comparire nella dashboard dei consumi, perché la risposta con il conteggio non arriva.
+- **Lock in memoria.** Le scritture contemporanee sono protette all'interno di un solo processo Node, che è il caso dell'app (in locale e su Render). Con più istanze del backend sugli stessi file servirebbe un database o un lock su file.
 - **PDF scansionati.** Senza OCR non contengono testo e vengono rifiutati.
 - **Dati inviati a OpenAI.** Embedding, estrazione dei dati chiave e risposte passano dal provider (vedi [Sicurezza](#15-sicurezza)).
 - **Costi.** Un **tetto di spesa giornaliero** (`DAILY_BUDGET_USD`, default 0 = nessun limite) sospende le nuove richieste all'AI quando la spesa stimata di oggi raggiunge la soglia; la card "Oggi" nella dashboard diventa rossa. È una rete di sicurezza contro consumi imprevisti, non un limite per utente: la stima si basa sui prezzi di listino, quindi tienila un po' sotto il budget reale.

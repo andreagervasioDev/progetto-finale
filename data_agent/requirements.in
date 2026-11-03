@@ -1,0 +1,16 @@
+# Vincoli delle dipendenze del data agent: cosa serve e da quale versione.
+# Le versioni esatte da installare sono in requirements.txt, generato da questo file:
+#   npm run lock:python        (dalla root; usa uv, installato con requirements-dev.txt)
+# Dopo una modifica qui, rigenera il lock e committa entrambi i file.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+# pandas 3 cambia il comportamento di stringhe e copie: il codice e il benchmark sono testati con la 3
+pandas>=3.0,<4
+numpy>=2.0,<3
+matplotlib>=3.8
+# dipendenza di matplotlib: le versioni precedenti hanno vulnerabilità note (pip-audit)
+pillow>=13.0
+openai>=1.50,<4
+python-dotenv>=1.0
+openpyxl>=3.1
+python-multipart>=0.0.9

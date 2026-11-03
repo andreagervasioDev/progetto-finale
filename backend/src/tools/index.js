@@ -85,6 +85,8 @@ export function toolDefinitionsFor(ctx) {
 }
 
 async function runSearchKnowledgeBase({ query, scope, category }, ctx) {
+  // la ricerca passa da Chroma, che non accetta un signal: almeno non la si avvia se l'utente se n'è già andato
+  ctx.signal?.throwIfAborted();
   const onlyOpenDoc = ctx.document && scope !== "tutti";
   let results = await searchKnowledgeBase(query, {
     userId: ctx.userId,
@@ -119,7 +121,7 @@ async function runSearchKnowledgeBase({ query, scope, category }, ctx) {
 
 async function runAnalyzeData({ question, context, dataset_id }, ctx) {
   const datasetId = dataset_id || ctx.dataset?.id || "partite";
-  const data = await analyzeData({ question, context, datasetId });
+  const data = await analyzeData({ question, context, datasetId, signal: ctx.signal });
   // token consumati dal pandas agent Python, attribuiti all'utente che ha fatto la domanda
   for (const u of data.usage ?? []) recordUsage({ kind: "data_agent", model: u.model, usage: u });
   // ogni grafico ha la specifica JSON (disegnata dal frontend con React) e il PNG di matplotlib (url)
@@ -136,6 +138,8 @@ async function runAnalyzeData({ question, context, dataset_id }, ctx) {
     code: data.steps,
     cleaning: data.cleaning_report,
     dataset: data.dataset,
+    // analisi già fatta sugli stessi dati: restituita dalla cache del data agent
+    cached: Boolean(data.cached),
   };
 }
 

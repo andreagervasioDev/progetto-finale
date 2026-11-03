@@ -13,12 +13,14 @@ import path from "node:path";
 import { config } from "../config.js";
 import { hashPassword } from "../services/passwordService.js";
 import { claimOrphanConversations } from "./conversationRepository.js";
+import { withLock, writeJsonAtomic } from "./jsonFile.js";
 
 const FILE = path.join(config.storageDir, "users.json");
 
 await fs.mkdir(path.dirname(FILE), { recursive: true });
 
 let users = null; // cache in memoria
+let loading = null; // primo caricamento in corso: le richieste contemporanee aspettano lo stesso
 
 /** Dati dell'utente da inviare al frontend (mai l'hash della password). */
 export const publicUser = ({ id, username, name, role, isAdmin, createdAt, lastLoginAt }) => ({
@@ -31,24 +33,31 @@ export const publicUser = ({ id, username, name, role, isAdmin, createdAt, lastL
   lastLoginAt: lastLoginAt ?? null,
 });
 
-async function save() {
-  await fs.writeFile(FILE + ".tmp", JSON.stringify(users, null, 2));
-  await fs.rename(FILE + ".tmp", FILE);
-}
+// scritture in fila: ognuna salva lo stato più recente, nessuna si sovrappone a un'altra
+const save = () => withLock(FILE, () => writeJsonAtomic(FILE, users, 2));
 
-async function load() {
-  if (users) return users;
-  try {
-    users = JSON.parse(await fs.readFile(FILE, "utf8"));
-  } catch {
-    users = [];
-  }
-  if (await ensureDefaultUsers()) await save();
-  return users;
+function load() {
+  if (users) return Promise.resolve(users);
+  // senza questa promessa condivisa, due richieste al primo avvio creerebbero due volte gli utenti predefiniti
+  loading ??= (async () => {
+    let loaded;
+    try {
+      loaded = JSON.parse(await fs.readFile(FILE, "utf8"));
+    } catch {
+      loaded = [];
+    }
+    const changed = await ensureDefaultUsers(loaded);
+    users = loaded; // visibile alle altre richieste solo quando è completo
+    if (changed) await save();
+    return users;
+  })().finally(() => {
+    loading = null;
+  });
+  return loading;
 }
 
 /** Crea gli utenti predefiniti mancanti. @returns true se qualcosa è cambiato */
-async function ensureDefaultUsers() {
+async function ensureDefaultUsers(users) {
   let changed = false;
   if (!users.some((u) => u.username === "admin")) {
     // un profilo esistente senza login diventa l'amministratore (mantiene conversazioni e documenti)

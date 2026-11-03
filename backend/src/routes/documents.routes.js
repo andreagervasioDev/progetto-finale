@@ -12,7 +12,6 @@
  *   DELETE /api/documents/:id          elimina (non i documenti ufficiali)
  */
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { Router } from "express";
 import multer from "multer";
@@ -20,6 +19,7 @@ import { removeDataset } from "../clients/dataAgentClient.js";
 import { CATEGORIES, getCategory, isCategory } from "../documents/categories.js";
 import { SUPPORTED_TYPES, isTabular, readableContent } from "../documents/extract.js";
 import { UnsafeFileError, verifyFileContent } from "../documents/fileCheck.js";
+import { discardUpload, tempUploadStorage } from "../documents/uploadStorage.js";
 import { logError } from "../logger.js";
 import { deleteDocumentChunks } from "../rag/vectorStore.js";
 import {
@@ -40,10 +40,15 @@ import { DocumentError, plainText, processDocument } from "../services/documentS
 import { assertWithinBudget } from "../services/usageService.js";
 
 const MAX_SIZE_MB = 20;
+const MAX_BYTES = MAX_SIZE_MB * 1024 * 1024;
+// il corpo multipart contiene, oltre al file, i campi del modulo e i separatori
+const MULTIPART_OVERHEAD = 64 * 1024;
+const TOO_LARGE = `File troppo grande (massimo ${MAX_SIZE_MB} MB).`;
 
 const upload = multer({
-  dest: path.join(os.tmpdir(), "managementai-uploads"),
-  limits: { fileSize: MAX_SIZE_MB * 1024 * 1024, files: 1 },
+  storage: tempUploadStorage,
+  // multer scrive il file su disco a blocchi e si ferma appena supera fileSize
+  limits: { fileSize: MAX_BYTES, files: 1 },
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     if (SUPPORTED_TYPES[ext]) return cb(null, true);
@@ -57,18 +62,38 @@ const upload = multer({
  */
 function receiveFile(req, res) {
   return new Promise((resolve) => {
+    // dimensione dichiarata oltre il limite: 413 subito; il corpo non viene né elaborato né salvato
+    if (Number(req.headers["content-length"]) > MAX_BYTES + MULTIPART_OVERHEAD) {
+      res.set("Connection", "close").status(413).json({ error: TOO_LARGE });
+      return resolve(null);
+    }
+    // corpo inviato senza Content-Length (i browser lo dichiarano sempre): conto i byte mentre arrivano e,
+    // appena si supera la soglia, chiudo la connessione e cancello il file parziale. multer da solo
+    // smetterebbe di scrivere ma leggerebbe e scarterebbe il resto del corpo fino alla fine.
+    let received = 0;
+    const countBytes = (chunk) => {
+      received += chunk.length;
+      if (received <= MAX_BYTES + MULTIPART_OVERHEAD) return;
+      req.off("data", countBytes);
+      discardUpload(req);
+      req.socket?.destroy();
+      resolve(null);
+    };
+    req.on("data", countBytes);
     upload.single("file")(req, res, async (err) => {
+      req.off("data", countBytes);
+      if (res.headersSent || req.socket?.destroyed) return resolve(null); // ricezione già interrotta
       if (err) {
         // solo gli errori "attesi" (limiti di multer, formato non supportato) arrivano all'utente;
         // gli altri (es. disco pieno) contengono percorsi del server: vanno nei log
         const expected = err instanceof multer.MulterError || err instanceof DocumentError;
         if (!expected) logError("[documenti] ricezione del file non riuscita:", err);
-        const msg =
-          err.code === "LIMIT_FILE_SIZE"
-            ? `File troppo grande (massimo ${MAX_SIZE_MB} MB).`
-            : expected
-              ? err.message
-              : "Ricezione del file non riuscita, riprova.";
+        if (err.code === "LIMIT_FILE_SIZE") {
+          // multer ha già interrotto la scrittura e cancellato il file parziale
+          res.set("Connection", "close").status(413).json({ error: TOO_LARGE });
+          return resolve(null);
+        }
+        const msg = expected ? err.message : "Ricezione del file non riuscita, riprova.";
         res.status(expected ? (err.status ?? 400) : 500).json({ error: msg });
         return resolve(null);
       }

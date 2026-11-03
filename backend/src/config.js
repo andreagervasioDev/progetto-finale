@@ -18,6 +18,9 @@ export const config = {
   openaiApiKey: isPlaceholder ? undefined : apiKey.trim(),
   chatModel: process.env.OPENAI_MODEL || "gpt-4.1-mini",
   embeddingModel: process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small",
+  // senza un limite esplicito l'SDK aspetta fino a 10 minuti per chiamata, con 2 tentativi in più
+  openaiTimeoutMs: Number(process.env.OPENAI_TIMEOUT_MS || 60000),
+  openaiMaxRetries: Number(process.env.OPENAI_MAX_RETRIES ?? 1),
   chroma: {
     host: process.env.CHROMA_HOST || "localhost",
     port: Number(process.env.CHROMA_PORT || 8000),

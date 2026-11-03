@@ -6,6 +6,7 @@
   "scripts": {
     "setup": "npm install && npm --prefix backend install && npm --prefix frontend install && npm run setup:python",
     "setup:python": "cd data_agent && python3 -m venv .venv && .venv/bin/python -m pip install --upgrade pip && .venv/bin/pip install -r requirements-dev.txt",
+    "lock:python": "sh data_agent/lock.sh",
     "dev": "concurrently -k -n chroma,agent,backend,frontend -c magenta,green,blue,yellow \"npm run chroma\" \"npm run agent\" \"npm run backend\" \"npm run frontend\"",
     "chroma": "npm --prefix backend run chroma",
     "agent": "cd data_agent && .venv/bin/python app.py",

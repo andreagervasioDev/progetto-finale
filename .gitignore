@@ -28,3 +28,6 @@ backend/storage/
 
 # Dataset caricati dagli utenti (data agent)
 data_agent/datasets/
+
+# Cache delle analisi del data agent
+data_agent/cache/

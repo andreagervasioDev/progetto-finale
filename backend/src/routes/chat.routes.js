@@ -4,6 +4,10 @@
  *   POST /api/chat/stream  stessa logica, con eventi Server-Sent Events durante il ragionamento
  *                          (quale strumento sta usando l'agente) e l'evento "final" con la risposta completa
  * body: { message: string, sessionId?: string, docId?: string }
+ *
+ * Se il client chiude la connessione prima della risposta (il frontend annulla con AbortController quando
+ * si cambia chat o se ne apre una nuova), il ciclo dell'agente si interrompe: niente altre chiamate a OpenAI
+ * o al data agent per una risposta che nessuno leggerebbe.
  */
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
@@ -43,14 +47,31 @@ function friendlyError(err) {
   return "Si è verificato un errore durante l'elaborazione della richiesta.";
 }
 
+/**
+ * AbortController legato alla connessione. Si ascolta "close" della risposta e non della richiesta: la
+ * richiesta si chiude già quando il corpo JSON è stato letto, la risposta solo quando la connessione finisce.
+ * Se si chiude prima che la risposta sia stata inviata per intero, il client se n'è andato.
+ */
+function abortOnDisconnect(res) {
+  const controller = new AbortController();
+  res.on("close", () => {
+    if (!res.writableFinished) controller.abort();
+  });
+  return controller.signal;
+}
+
+const logCancelled = () => console.log("[chat] richiesta annullata dal client: ciclo dell'agente interrotto");
+
 export const chatRouter = Router();
 
 chatRouter.post("/", async (req, res) => {
   const body = validateChatBody(req, res);
   if (!body) return;
+  const signal = abortOnDisconnect(res);
   try {
-    res.json(await handleTurn(req.user, body));
+    res.json(await handleTurn(req.user, body, undefined, signal));
   } catch (err) {
+    if (signal.aborted) return logCancelled();
     // il tetto di spesa (402) e altri errori con status noto lo propagano; gli altri sono 500
     res.status(err?.status === 402 ? 402 : 500).json({ error: friendlyError(err) });
   }
@@ -65,13 +86,17 @@ chatRouter.post("/stream", async (req, res) => {
     "Cache-Control": "no-cache, no-transform",
     Connection: "keep-alive",
   });
-  const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  const signal = abortOnDisconnect(res);
+  const send = (event, data) => {
+    if (!signal.aborted) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
   send("session", { sessionId: body.sessionId });
 
   try {
-    const result = await handleTurn(req.user, body, (e) => send(e.type, e));
+    const result = await handleTurn(req.user, body, (e) => send(e.type, e), signal);
     send("final", result);
   } catch (err) {
+    if (signal.aborted) return logCancelled();
     send("error", { error: friendlyError(err) });
   } finally {
     res.end();
