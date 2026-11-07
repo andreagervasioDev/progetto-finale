@@ -14,3 +14,5 @@ openai>=1.50,<4
 python-dotenv>=1.0
 openpyxl>=3.1
 python-multipart>=0.0.9
+# cache delle analisi su Redis, se REDIS_URL è impostato (altrimenti file JSON locale)
+redis>=5.0

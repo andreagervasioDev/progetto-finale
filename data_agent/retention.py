@@ -24,6 +24,8 @@ log = logging.getLogger(__name__)
 
 CHART_FILE = re.compile(r"^chart_[a-f0-9]+\.png$")
 DAY = 24 * 60 * 60
+# pausa minima tra due pulizie: con un intervallo 0 o negativo il ciclo non gira a vuoto
+MIN_INTERVAL_S = 60.0
 
 
 @dataclass
@@ -97,4 +99,4 @@ async def retention_loop(charts_dir: Path, policy: RetentionPolicy) -> None:
                          result["removed"], result["freed_mb"], result["kept"])
         except Exception:  # noqa: BLE001 - un errore di disco non deve fermare il servizio
             log.exception("Retention dei grafici non riuscita")
-        await asyncio.sleep(max(policy.interval_hours, 0.01) * 3600)
+        await asyncio.sleep(max(policy.interval_hours * 3600, MIN_INTERVAL_S))

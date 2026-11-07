@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import time
 from pathlib import Path
 
 from retention import DAY, RetentionPolicy, charts_status, cleanup_charts, retention_loop
@@ -83,6 +84,114 @@ def test_il_ciclo_pulisce_subito_all_avvio(tmp_path):
 
     asyncio.run(run())
     assert not old.exists()
+
+
+# --------------------------------------------------------------------------- #
+# Ciclo periodico: il vero retention_loop, con un intervallo di 0,1 secondi
+# --------------------------------------------------------------------------- #
+INTERVAL_S = 0.1
+FAST = RetentionPolicy(days=30, interval_hours=INTERVAL_S / 3600)
+
+
+def _old_chart(folder: Path, name: str) -> Path:
+    path = folder / name
+    path.write_bytes(b"x")
+    os.utime(path, (0, 0))  # 1970: oltre qualsiasi soglia
+    return path
+
+
+async def _wait_until(condition, timeout: float = 2.0) -> bool:
+    for _ in range(int(timeout / 0.01)):
+        if condition():
+            return True
+        await asyncio.sleep(0.01)
+    return False
+
+
+def test_il_ciclo_ripete_la_pulizia_a_ogni_intervallo(tmp_path, monkeypatch):
+    import retention
+
+    monkeypatch.setattr(retention, "MIN_INTERVAL_S", 0)
+    runs = []
+    real_cleanup = retention.cleanup_charts
+    monkeypatch.setattr(retention, "cleanup_charts", lambda *a: runs.append(1) or real_cleanup(*a))
+
+    async def run():
+        task = asyncio.create_task(retention_loop(tmp_path, FAST))
+        assert await _wait_until(lambda: len(runs) == 1)  # pulizia all'avvio
+        # grafici scaduti DOPO l'avvio: li elimina solo un giro successivo del ciclo
+        for i in range(1, 4):
+            old = _old_chart(tmp_path, f"chart_cafe00000{i}.png")
+            assert await _wait_until(lambda: not old.exists()), f"giro {i}: il PNG scaduto non è stato eliminato"
+        recent = tmp_path / "chart_beef000001.png"
+        recent.write_bytes(b"x")  # appena creato: deve restare anche dopo altri giri
+        before = len(runs)
+        assert await _wait_until(lambda: len(runs) >= before + 2)
+        task.cancel()
+        return recent.exists()
+
+    assert asyncio.run(run()) is True
+    assert len(runs) >= 5  # avvio + almeno 4 giri periodici
+
+
+def test_tra_due_pulizie_il_ciclo_aspetta_l_intervallo(tmp_path, monkeypatch):
+    import retention
+
+    monkeypatch.setattr(retention, "MIN_INTERVAL_S", 0)
+    times = []
+    monkeypatch.setattr(retention, "cleanup_charts", lambda *a: times.append(time.monotonic()) or {"removed": 0})
+
+    async def run():
+        task = asyncio.create_task(retention_loop(tmp_path, FAST))
+        await _wait_until(lambda: len(times) >= 4)
+        task.cancel()
+
+    asyncio.run(run())
+    gaps = [b - a for a, b in zip(times, times[1:])]
+    assert gaps and all(g >= INTERVAL_S * 0.9 for g in gaps), gaps  # non gira a vuoto
+
+
+def test_un_errore_non_ferma_il_ciclo(tmp_path, monkeypatch):
+    import retention
+
+    monkeypatch.setattr(retention, "MIN_INTERVAL_S", 0)
+    calls = []
+    real_cleanup = retention.cleanup_charts
+
+    def flaky(*args):
+        calls.append(1)
+        if len(calls) == 1:
+            raise PermissionError("disco non disponibile")  # primo giro fallito
+        return real_cleanup(*args)
+
+    monkeypatch.setattr(retention, "cleanup_charts", flaky)
+    old = _old_chart(tmp_path, "chart_dead000001.png")
+
+    async def run():
+        task = asyncio.create_task(retention_loop(tmp_path, FAST))
+        ok = await _wait_until(lambda: not old.exists())
+        task.cancel()
+        return ok
+
+    assert asyncio.run(run()) is True  # il giro successivo ha fatto la pulizia
+    assert len(calls) >= 2
+
+
+def test_intervallo_minimo_tra_le_pulizie(tmp_path, monkeypatch):
+    import retention
+
+    monkeypatch.setattr(retention, "MIN_INTERVAL_S", 0.2)
+    calls = []
+    monkeypatch.setattr(retention, "cleanup_charts", lambda *a: calls.append(1) or {"removed": 0})
+
+    async def run():
+        # CHARTS_CLEANUP_INTERVAL_HOURS=0: senza minimo il ciclo girerebbe di continuo
+        task = asyncio.create_task(retention_loop(tmp_path, RetentionPolicy(days=30, interval_hours=0)))
+        await asyncio.sleep(0.5)
+        task.cancel()
+
+    asyncio.run(run())
+    assert 1 <= len(calls) <= 3
 
 
 def test_health_e_cartella_dei_test_isolata():

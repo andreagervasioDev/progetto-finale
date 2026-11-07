@@ -35,7 +35,7 @@ BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR.parent / ".env")  # .env unico nella root del progetto
 
 from agent import CHARTS_DIR, SCHEMA_DESCRIPTION, AnalysisCancelled, PandasAgent, data_agent_model  # noqa: E402
-from analysis_cache import AnalysisCache, cache_key  # noqa: E402
+from analysis_cache import analysis_cache_from_env, cache_key  # noqa: E402
 from cleaning import quality_summary  # noqa: E402
 from datasets import BUILTIN_ID, Dataset, DatasetError, DatasetStore  # noqa: E402
 from retention import RetentionPolicy, charts_status, retention_loop  # noqa: E402
@@ -49,7 +49,7 @@ DATASET_PATH = Path(os.getenv("DATASET_PATH", BASE_DIR / "data" / "player_perfor
 MAX_UPLOAD_MB = 20
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 RETENTION = RetentionPolicy.from_env()
-ANALYSIS_CACHE = AnalysisCache.from_env()
+ANALYSIS_CACHE = analysis_cache_from_env()  # Redis se REDIS_URL è impostato, altrimenti file JSON
 state: dict = {}
 
 

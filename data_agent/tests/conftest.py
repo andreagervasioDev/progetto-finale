@@ -25,6 +25,7 @@ os.environ["CHARTS_DIR"] = _CHARTS_TMP.name
 _CACHE_TMP = tempfile.TemporaryDirectory(prefix="management-ai-cache-")
 os.environ["ANALYZE_CACHE_DIR"] = _CACHE_TMP.name
 os.environ["OPENAI_API_KEY"] = ""  # load_dotenv non sovrascrive le variabili già presenti
+os.environ["REDIS_URL"] = ""  # l'app dei test usa la cache su file; i test di Redis creano la propria
 
 CSV_PATH = AGENT_DIR / "data" / "player_performance.csv"
 

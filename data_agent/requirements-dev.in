@@ -8,3 +8,5 @@ httpx>=0.27
 pip-audit>=2.7
 duckdb>=1.1
 uv>=0.5
+# Redis in memoria per i test della cache (in CI i test usano anche un Redis vero)
+fakeredis>=2.20

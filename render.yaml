@@ -53,3 +53,20 @@ services:
         value: /data/datasets
       - key: ANALYZE_CACHE_DIR
         value: /data/cache
+      # --- cache delle analisi su Redis (Key Value qui sotto); senza, il data agent usa il file JSON ---
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: progetto-management-ai-cache
+          property: connectionString
+
+  # Redis gestito da Render (Key Value) per la cache delle analisi. Piano gratuito: 25 MB e nessuna
+  # persistenza, che per una cache va bene (al riavvio le analisi si rifanno). Con allkeys-lru, se la
+  # memoria finisce Redis elimina le voci usate meno di recente invece di rifiutare le scritture.
+  - type: keyvalue
+    name: progetto-management-ai-cache
+    plan: free
+    region: frankfurt
+    maxmemoryPolicy: allkeys-lru
+    # nessun accesso da internet: solo dai servizi Render della stessa regione, sulla rete privata
+    ipAllowList: []
