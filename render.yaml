@@ -54,6 +54,10 @@ services:
       - key: ANALYZE_CACHE_DIR
         value: /data/cache
       # --- cache delle analisi su Redis (Key Value qui sotto); senza, il data agent usa il file JSON ---
+      # 15 MB di analisi su 25 MB del piano gratuito: il resto resta a Redis (indici, struttura interna),
+      # così Redis non deve mai eliminare chiavi da solo (evicted_keys in /api/health)
+      - key: ANALYZE_CACHE_MAX_MB
+        value: "15"
       - key: REDIS_URL
         fromService:
           type: keyvalue

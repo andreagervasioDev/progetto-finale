@@ -13,8 +13,13 @@
  *     non vengono più trovate;
  *   - il modello: cambiando OPENAI_MODEL le risposte si rigenerano.
  *
- * Le voci scadono dopo QUERY_CACHE_TTL_HOURS ore (0 = cache disattivata) e ne restano al massimo
- * QUERY_CACHE_MAX_ENTRIES: oltre il limite si eliminano quelle usate meno di recente.
+ * Limiti (le voci stanno in memoria e su disco, in storage/answer_cache.json):
+ *   - durata: le voci scadono dopo QUERY_CACHE_TTL_HOURS ore (0 = cache disattivata);
+ *   - numero: ne restano al massimo QUERY_CACHE_MAX_ENTRIES;
+ *   - dimensione di una voce: una risposta che da sola supera QUERY_CACHE_MAX_ENTRY_KB kilobyte (default 512)
+ *     non si salva. Anche una sola risposta molto grande, con grafici e tabelle, occuperebbe molto spazio;
+ *   - spazio totale: in tutto al massimo QUERY_CACHE_MAX_MB megabyte (default 20).
+ * Per i limiti di spazio 0 = nessun limite. Oltre un limite si eliminano le voci usate meno di recente.
  */
 import { createHash } from "node:crypto";
 import { config } from "../config.js";
@@ -48,6 +53,18 @@ export function cacheKey({ question, docId, docs, model = config.chatModel }) {
 }
 
 const ttlMs = () => config.answerCache.ttlHours * 60 * 60 * 1000;
+const MB = 1024 * 1024;
+const maxBytes = () => (config.answerCache.maxMb > 0 ? config.answerCache.maxMb * MB : null);
+/** Una voce non può superare il suo limite né lo spazio dell'intera cache. */
+function maxEntryBytes() {
+  const limits = [config.answerCache.maxEntryKb > 0 ? config.answerCache.maxEntryKb * 1024 : null, maxBytes()].filter(Boolean);
+  return limits.length ? Math.min(...limits) : null;
+}
+/** Byte del JSON salvato, misurati al salvataggio (le voci salvate prima si misurano al momento). */
+const entrySize = (entry) => entry.size ?? Buffer.byteLength(JSON.stringify(entry));
+const roundMb = (bytes) => Math.round((bytes / MB) * 100) / 100;
+
+let tooLarge = 0; // risposte non salvate perché troppo grandi, dall'avvio
 
 /** Risposta salvata per la chiave, oppure null (assente o scaduta). */
 export async function getCachedAnswer(key, now = Date.now()) {
@@ -70,18 +87,47 @@ export function isCacheable(result) {
 export async function storeAnswer(key, result, now = Date.now()) {
   if (!cacheEnabled() || !isCacheable(result)) return false;
   const { reply, charts, tables, sources, trace } = result;
-  await setEntry(key, { answer: { reply, charts, tables, sources, trace }, createdAt: now, lastHitAt: now, hits: 0 });
+  const entry = { answer: { reply, charts, tables, sources, trace }, createdAt: now, lastHitAt: now, hits: 0 };
+  entry.size = entrySize(entry);
+  const limit = maxEntryBytes();
+  if (limit && entry.size > limit) {
+    tooLarge++;
+    console.warn(`[cache] risposta non salvata: ${Math.round(entry.size / 1024)} KB, oltre il limite di ${Math.round(limit / 1024)} KB per voce`);
+    return false;
+  }
+  await setEntry(key, entry);
   await prune(now);
   return true;
 }
 
-/** Elimina le voci scadute e, oltre il limite, quelle usate meno di recente. */
+/** Elimina le voci scadute e, oltre il numero di voci o lo spazio, quelle usate meno di recente. */
 async function prune(now) {
   const entries = await allEntries();
   const expired = entries.filter(([, e]) => now - e.createdAt > ttlMs()).map(([k]) => k);
   const alive = entries
     .filter(([k]) => !expired.includes(k))
     .sort((a, b) => (b[1].lastHitAt ?? b[1].createdAt) - (a[1].lastHitAt ?? a[1].createdAt));
+  const kept = alive.slice(0, config.answerCache.maxEntries);
   const excess = alive.slice(config.answerCache.maxEntries).map(([k]) => k);
+  // spazio: dalla meno usata di recente, finché il totale rientra nel limite
+  let total = kept.reduce((sum, [, e]) => sum + entrySize(e), 0);
+  const limit = maxBytes();
+  for (let i = kept.length - 1; limit && i >= 0 && total > limit; i--) {
+    total -= entrySize(kept[i][1]);
+    excess.push(kept[i][0]);
+  }
   if (expired.length || excess.length) await deleteEntries([...expired, ...excess]);
+}
+
+/** Stato per /api/health: voci valide, spazio occupato e limiti. */
+export async function answerCacheStatus(now = Date.now()) {
+  const alive = (await allEntries()).filter(([, e]) => now - e.createdAt <= ttlMs());
+  return {
+    entries: alive.length,
+    sizeMb: roundMb(alive.reduce((sum, [, e]) => sum + entrySize(e), 0)),
+    maxMb: config.answerCache.maxMb,
+    maxEntryKb: config.answerCache.maxEntryKb,
+    tooLarge,
+    ttlHours: config.answerCache.ttlHours,
+  };
 }

@@ -9,6 +9,7 @@ import { Router } from "express";
 import { dataAgentHealth } from "../clients/dataAgentClient.js";
 import { config } from "../config.js";
 import { chromaHeartbeat, getCollection } from "../rag/vectorStore.js";
+import { answerCacheStatus } from "../services/answerCacheService.js";
 
 export const healthRouter = Router();
 
@@ -36,7 +37,9 @@ healthRouter.get("/", async (_req, res) => {
     dataValidation: dataAgent?.validation ?? null,
     // PNG dei grafici salvati e giorni dopo cui vengono eliminati
     charts: dataAgent?.charts ?? null,
-    // cache delle analisi del data agent: voci salvate, riusi e analisi rifatte
+    // cache delle analisi del data agent: voci salvate, riusi, spazio occupato e limiti
     analysisCache: dataAgent?.analysis_cache ?? null,
+    // cache delle risposte del backend: voci, spazio occupato e limiti
+    answerCache: await answerCacheStatus().catch(() => null),
   });
 });

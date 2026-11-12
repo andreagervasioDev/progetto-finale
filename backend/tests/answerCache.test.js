@@ -2,7 +2,15 @@ import "./env.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { config } from "../src/config.js";
-import { archiveVersion, cacheKey, getCachedAnswer, isCacheable, normalizeQuestion, storeAnswer } from "../src/services/answerCacheService.js";
+import {
+  answerCacheStatus,
+  archiveVersion,
+  cacheKey,
+  getCachedAnswer,
+  isCacheable,
+  normalizeQuestion,
+  storeAnswer,
+} from "../src/services/answerCacheService.js";
 
 const docs = [
   { id: "a", title: "Protocollo medico", category: "regolamenti", size: 100, chunks: 9 },
@@ -90,4 +98,58 @@ test("con durata 0 la cache è disattivata", async () => {
   } finally {
     config.answerCache.ttlHours = previous;
   }
+});
+
+// --- spazio: limite per singola risposta e limite totale ---
+const big = (kb, tag) => answer(tag + "a".repeat(kb * 1024));
+
+/** Esegue `fn` con limiti della cache temporanei, poi ripristina quelli di partenza. */
+async function withLimits(limits, fn) {
+  const previous = { ...config.answerCache };
+  Object.assign(config.answerCache, limits);
+  try {
+    await fn();
+  } finally {
+    Object.assign(config.answerCache, previous);
+  }
+}
+
+test("una sola risposta oltre il limite per voce non si salva, anche con spazio totale libero", async () => {
+  await withLimits({ maxMb: 20, maxEntryKb: 512 }, async () => {
+    const before = (await answerCacheStatus()).tooLarge;
+    const ok = cacheKey({ question: "Risposta da 400 KB", docs });
+    const huge = cacheKey({ question: "Risposta da 600 KB", docs });
+    assert.equal(await storeAnswer(ok, big(400, "ok")), true);
+    assert.equal(await storeAnswer(huge, big(600, "huge")), false);
+    assert.equal(await getCachedAnswer(huge), null);
+    const status = await answerCacheStatus();
+    assert.equal(status.tooLarge, before + 1);
+    assert.equal(status.maxEntryKb, 512);
+  });
+});
+
+test("oltre lo spazio totale escono le risposte usate meno di recente", async () => {
+  await withLimits({ maxMb: 1, maxEntryKb: 512, maxEntries: 100 }, async () => {
+    const now = Date.now();
+    const keys = [1, 2, 3, 4, 5].map((i) => cacheKey({ question: `spazio ${i}`, docs }));
+    for (const [i, key] of keys.entries()) await storeAnswer(key, big(300, String(i)), now + i);
+    // 5 risposte da 300 KB con 1 MB: ne restano 3, le più recenti
+    const kept = await Promise.all(keys.map((k) => getCachedAnswer(k, now + 10).then(Boolean)));
+    assert.deepEqual(kept, [false, false, true, true, true]);
+    const status = await answerCacheStatus(now + 10);
+    assert.ok(status.sizeMb <= 1 && status.sizeMb >= 0.85, `${status.sizeMb} MB`);
+  });
+});
+
+test("limiti di spazio a 0: nessun limite", async () => {
+  await withLimits({ maxMb: 0, maxEntryKb: 0 }, async () => {
+    assert.equal(await storeAnswer(cacheKey({ question: "Senza limiti", docs }), big(600, "x")), true);
+  });
+});
+
+test("/api/health espone lo stato della cache delle risposte", async () => {
+  const status = await answerCacheStatus();
+  assert.deepEqual(Object.keys(status).sort(), ["entries", "maxEntryKb", "maxMb", "sizeMb", "tooLarge", "ttlHours"]);
+  assert.equal(status.maxMb, 20);
+  assert.equal(status.maxEntryKb, 512);
 });

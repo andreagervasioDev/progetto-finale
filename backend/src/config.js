@@ -40,6 +40,9 @@ export const config = {
   answerCache: {
     ttlHours: Number(process.env.QUERY_CACHE_TTL_HOURS || 24),
     maxEntries: Number(process.env.QUERY_CACHE_MAX_ENTRIES || 200),
+    // spazio: in tutto e per singola risposta (0 = nessun limite); le voci stanno in memoria e su disco
+    maxMb: Number(process.env.QUERY_CACHE_MAX_MB || 20),
+    maxEntryKb: Number(process.env.QUERY_CACHE_MAX_ENTRY_KB || 512),
   },
   // online (es. Render): il backend serve anche il frontend compilato (frontend/dist) sullo stesso indirizzo
   frontendDist: process.env.SERVE_FRONTEND === "true" ? path.resolve(BACKEND_DIR, "..", "frontend", "dist") : null,
